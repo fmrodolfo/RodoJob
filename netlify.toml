@@ -1,0 +1,26 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+# Redirige las llamadas /api/* a las funciones serverless
+[[redirects]]
+  from = "/api/jobs"
+  to = "/.netlify/functions/jobs"
+  status = 200
+
+[[redirects]]
+  from = "/api/ai"
+  to = "/.netlify/functions/gemini"
+  status = 200
+
+[[redirects]]
+  from = "/api/companies"
+  to = "/.netlify/functions/companies"
+  status = 200
+
+# SPA fallback: cualquier ruta la maneja React Router
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
