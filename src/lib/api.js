@@ -98,6 +98,22 @@ export async function searchCompanies({ where, sector }) {
   return res.json()
 }
 
+export async function geocodeCity(q) {
+  const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`)
+  if (!res.ok) return []
+  return res.json()
+}
+
+// La IA lee el CV y devuelve puestos a buscar EN EL IDIOMA del país destino.
+export async function aiJobTerms({ profile, country, city }) {
+  const text = await askAI({ task: { kind: 'jobTerms', country, city }, profile })
+  return text
+    .split(/[,\n]/)
+    .map((s) => s.replace(/^[-\d.\s]+/, '').trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 3)
+}
+
 export async function askAI({ task, profile }) {
   const res = await fetch('/api/ai', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },

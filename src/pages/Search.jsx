@@ -1,84 +1,103 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
-import { searchJobs, portalLinks, rolesFromDocs, COUNTRIES, DATE_FILTERS } from '../lib/api'
-import { Search as SearchIcon, ExternalLink, Check, Sparkles, MapPin, Globe, Clock, Briefcase } from 'lucide-react'
+import { searchJobs, portalLinks, rolesFromDocs, aiJobTerms, COUNTRIES, DATE_FILTERS } from '../lib/api'
+import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase } from 'lucide-react'
 import CandidacyModal from '../components/CandidacyModal'
+import CityPicker from '../components/CityPicker'
 
 export default function SearchPage() {
-  const { docs, markApplied, isApplied } = useApp()
-  const roles = rolesFromDocs(docs)
+  const { activeProfile, docs, markApplied, isApplied } = useApp()
 
   const [refine, setRefine] = useState('')
-  const [where, setWhere] = useState('')
+  const [cities, setCities] = useState([])
   const [country, setCountry] = useState('ch')
   const [maxDays, setMaxDays] = useState('any')
 
   const [results, setResults] = useState([])
+  const [termsUsed, setTermsUsed] = useState([])
+  const [note, setNote] = useState('')
   const [loading, setLoading] = useState(false)
+  const [statusMsg, setStatusMsg] = useState('')
   const [err, setErr] = useState('')
   const [searched, setSearched] = useState(false)
   const [candidacyJob, setCandidacyJob] = useState(null)
 
-  const term = (refine.trim() || roles[0] || '')
+  const hasCV = docs.some((d) => d.type === 'cv')
+  const countryName = COUNTRIES.find((c) => c.code === country)?.name || ''
+
+  async function decideTerms() {
+    if (refine.trim()) return [refine.trim()]
+    // La IA lee el CV y da puestos en el idioma del país
+    try {
+      const terms = await aiJobTerms({
+        profile: { name: activeProfile?.name, docs },
+        country: countryName, city: cities[0],
+      })
+      if (terms.length) return terms
+    } catch { /* si falla la IA, usamos lo derivado del CV */ }
+    const roles = rolesFromDocs(docs)
+    return roles.length ? roles : ['empleo']
+  }
+
+  async function runSearch(terms, cityList) {
+    const all = []; const seen = new Set()
+    for (const city of cityList) {
+      for (const t of terms) {
+        const data = await searchJobs({ what: t, where: city, country, maxDaysOld: maxDays })
+        for (const j of (data.results || [])) {
+          const k = j.redirect_url || j.id
+          if (!seen.has(k)) { seen.add(k); all.push(j) }
+        }
+      }
+    }
+    return all
+  }
 
   async function run() {
-    setLoading(true); setErr(''); setSearched(true)
+    setLoading(true); setErr(''); setNote(''); setSearched(true)
     try {
-      const cities = where.split(',').map((s) => s.trim()).filter(Boolean)
-      const list = cities.length ? cities : ['']
-      const all = []
-      const seen = new Set()
-      for (const city of list) {
-        const data = await searchJobs({ what: term || 'empleo', where: city, country, maxDaysOld: maxDays })
-        for (const j of (data.results || [])) {
-          if (seen.has(j.redirect_url || j.id)) continue
-          seen.add(j.redirect_url || j.id)
-          all.push(j)
-        }
+      setStatusMsg(refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tu CV…')
+      const terms = await decideTerms()
+      setTermsUsed(terms)
+      setStatusMsg('Buscando ofertas…')
+      let all = await runSearch(terms, cities.length ? cities : [''])
+      if (all.length === 0 && cities.length) {
+        // respaldo: buscar en todo el país si la ciudad no dio resultados
+        all = await runSearch(terms, [''])
+        if (all.length) setNote(`No encontré ofertas exactamente en ${cities.join(', ')}; te muestro las de todo el país (${countryName}).`)
       }
       setResults(all)
     } catch (e) {
       setErr(e.message || 'No se pudieron cargar las ofertas.'); setResults([])
-    } finally { setLoading(false) }
+    } finally { setLoading(false); setStatusMsg('') }
   }
 
   const visible = results.filter((j) => !isApplied(j))
-  const links = portalLinks(country, term, where.split(',')[0] || '')
+  const links = portalLinks(country, termsUsed[0] || '', cities[0] || '')
 
   return (
     <div>
       <h1 className="page-title">Ofertas para ti</h1>
-      <p className="page-sub">La IA lee tus CVs y te busca ofertas. No hace falta que escribas el puesto.</p>
+      <p className="page-sub">La IA lee tus CVs y busca ofertas en el idioma del país. No hace falta que escribas el puesto.</p>
 
       <div className="card">
-        {roles.length > 0 ? (
-          <>
-            <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--sky-700)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Sparkles size={14} /> La IA busca según tu CV
-            </label>
-            <div className="tabs" style={{ marginBottom: 14 }}>
-              {roles.map((r) => <span key={r} className="chip active">{r}</span>)}
-            </div>
-          </>
-        ) : (
+        {!hasCV && (
           <div className="card" style={{ background: '#fef3c7', border: '1px solid #fde68a', marginBottom: 14 }}>
             Añade un CV en tu perfil (pestaña Perfil) y la IA buscará ofertas por ti.
           </div>
         )}
 
-        <div className="row">
-          <div className="field">
-            <label><MapPin size={13} style={{ verticalAlign: -2 }} /> Ciudad(es) — separa por comas</label>
-            <input className="input" value={where} onChange={(e) => setWhere(e.target.value)}
-              placeholder="Ginebra, Lausana, Berna..." onKeyDown={(e) => e.key === 'Enter' && run()} />
-          </div>
-          <div className="field">
-            <label><Globe size={13} style={{ verticalAlign: -2 }} /> País</label>
-            <select className="select" value={country} onChange={(e) => setCountry(e.target.value)}>
-              {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
-            </select>
-          </div>
+        <div className="field">
+          <label>Ciudad(es) — escribe y elige de la lista</label>
+          <CityPicker cities={cities} onChange={setCities} placeholder="Ginebra, Lausana, Berna…" />
+        </div>
+
+        <div className="field">
+          <label><Globe size={13} style={{ verticalAlign: -2 }} /> País</label>
+          <select className="select" value={country} onChange={(e) => setCountry(e.target.value)}>
+            {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+          </select>
         </div>
 
         <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: 'var(--sky-700)', display: 'block' }}>Publicadas hace</label>
@@ -91,23 +110,32 @@ export default function SearchPage() {
         <div className="field">
           <label>Afinar búsqueda (opcional)</label>
           <input className="input" value={refine} onChange={(e) => setRefine(e.target.value)}
-            placeholder="p. ej. ayudante de cocina, fin de semana..." />
+            placeholder="p. ej. serveur, ayudante de cocina…" />
         </div>
 
-        <button className="btn block" onClick={run} disabled={loading || roles.length === 0}>
-          {loading ? <span className="spinner" /> : <><SearchIcon size={18} /> Buscar ofertas para mí</>}
+        <button className="btn block" onClick={run} disabled={loading || !hasCV}>
+          {loading ? <><span className="spinner" /> {statusMsg}</> : <><SearchIcon size={18} /> Buscar ofertas para mí</>}
         </button>
       </div>
 
-      {searched && (term || where) && (
+      {termsUsed.length > 0 && searched && !loading && (
         <div className="card">
-          <p className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>
-            Buscar también en los portales de {COUNTRIES.find((c) => c.code === country)?.name}:
+          <p className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Sparkles size={14} /> La IA buscó estos puestos:
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {links.map((l) => (
-              <a key={l.name} className="chip" href={l.href} target="_blank" rel="noreferrer">{l.name} <ExternalLink size={13} /></a>
-            ))}
+            {termsUsed.map((t) => <span key={t} className="chip active">{t}</span>)}
+          </div>
+        </div>
+      )}
+
+      {note && <div className="card" style={{ background: 'var(--sky-50)', border: '1px solid var(--sky-200)', fontSize: 13 }}>{note}</div>}
+
+      {searched && (termsUsed.length > 0 || cities.length) && (
+        <div className="card">
+          <p className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Buscar también en los portales de {countryName}:</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {links.map((l) => <a key={l.name} className="chip" href={l.href} target="_blank" rel="noreferrer">{l.name} <ExternalLink size={13} /></a>)}
           </div>
         </div>
       )}
@@ -115,7 +143,7 @@ export default function SearchPage() {
       {err && <div className="card" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c' }}>{err}</div>}
 
       {searched && !loading && visible.length === 0 && !err && (
-        <div className="empty"><Briefcase size={40} /><p>No hay ofertas nuevas con estos filtros. Prueba otra fecha o ciudad.</p></div>
+        <div className="empty"><Briefcase size={40} /><p>No hay ofertas nuevas con estos filtros. Prueba otra ciudad, otra fecha, o escribe un puesto en "Afinar búsqueda".</p></div>
       )}
 
       <AnimatePresence>

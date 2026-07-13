@@ -4,12 +4,13 @@ import { useApp } from '../context/AppContext'
 import { searchCompanies, SECTORS } from '../lib/api'
 import { Search as SearchIcon, ExternalLink, Check, Sparkles, Building2, Mail } from 'lucide-react'
 import CandidacyModal from '../components/CandidacyModal'
+import CityPicker from '../components/CityPicker'
 
 const compKey = (c) => (c.name + '|' + c.location).toLowerCase().replace(/\W/g, '')
 
 export default function DirectoryPage() {
   const { contacts, addContact, deleteContact } = useApp()
-  const [where, setWhere] = useState('')
+  const [cities, setCities] = useState([])
   const [sector, setSector] = useState('restaurantes')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
@@ -22,12 +23,10 @@ export default function DirectoryPage() {
   async function run() {
     setLoading(true); setErr(''); setSearched(true)
     try {
-      const cities = where.split(',').map((s) => s.trim()).filter(Boolean)
-      const list = cities.length ? cities : []
-      if (!list.length) { setErr('Escribe al menos una ciudad.'); setLoading(false); return }
+      if (!cities.length) { setErr('Elige al menos una ciudad de la lista.'); setLoading(false); return }
       const all = []
       const seen = new Set()
-      for (const city of list) {
+      for (const city of cities) {
         const data = await searchCompanies({ where: city, sector })
         for (const c of (data.results || [])) {
           const k = compKey(c)
@@ -57,9 +56,8 @@ export default function DirectoryPage() {
 
       <div className="card">
         <div className="field">
-          <label>¿Dónde? Varias ciudades separadas por comas</label>
-          <input className="input" value={where} onChange={(e) => setWhere(e.target.value)}
-            placeholder="Ginebra, Lausana, Barcelona..." onKeyDown={(e) => e.key === 'Enter' && run()} />
+          <label>¿Dónde? Escribe y elige ciudades de la lista</label>
+          <CityPicker cities={cities} onChange={setCities} placeholder="Ginebra, Lausana, Barcelona…" />
         </div>
         <div className="field">
           <label>Sector</label>

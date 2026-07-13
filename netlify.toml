@@ -19,6 +19,11 @@
   to = "/.netlify/functions/companies"
   status = 200
 
+[[redirects]]
+  from = "/api/geocode"
+  to = "/.netlify/functions/geocode"
+  status = 200
+
 # SPA fallback: cualquier ruta la maneja React Router
 [[redirects]]
   from = "/*"
