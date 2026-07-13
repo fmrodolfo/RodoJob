@@ -6,16 +6,22 @@
 const MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama3-70b-8192']
 const SYSTEM = 'Eres un experto en recursos humanos y redacción de candidaturas. Escribes textos claros, honestos y persuasivos. Nunca inventas titulaciones o experiencias que el candidato no tiene.'
 
+const trim = (t, max) => { t = (t || '').trim(); return t.length > max ? t.slice(0, max) + '…' : t }
+
 function buildUserPrompt(task, profile) {
+  // Recortamos para no pasarnos del límite gratuito por minuto de la IA
   const cvs = (profile?.docs || [])
     .filter((d) => d.type === 'cv')
-    .map((d) => `# CV (${d.sector || 'general'} — ${d.title})\n${d.text || ''}`)
+    .slice(0, 2)
+    .map((d) => `# CV (${d.sector || 'general'} — ${d.title})\n${trim(d.text, 3000)}`)
     .join('\n\n') || '(sin CV cargado)'
   const letters = (profile?.docs || [])
     .filter((d) => d.type === 'carta')
-    .map((d) => `# Carta (${d.title})\n${d.text || ''}`)
+    .slice(0, 1)
+    .map((d) => `# Carta (${d.title})\n${trim(d.text, 1500)}`)
     .join('\n\n') || '(sin cartas cargadas)'
   const person = `Nombre del candidato: ${profile?.name || ''}\nMateriales del candidato:\n\n${cvs}\n\n${letters}`
+  if (task.job) task = { ...task, job: { ...task.job, description: trim(task.job.description, 1200) } }
 
   const lang = task.language && task.language !== 'auto'
     ? `Escribe el resultado en ${task.language}.`
@@ -57,7 +63,7 @@ export async function handler(event) {
       const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1800 }),
+        body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1400 }),
       })
       if (r.ok) {
         const data = await r.json()
@@ -66,8 +72,8 @@ export async function handler(event) {
       }
       const t = await r.text()
       lastErr = `Groq (${model}): ${t.slice(0, 200)}`
-      // Pasar a otro modelo si este no existe/está retirado o saturado
-      if (!(r.status === 404 || r.status === 429 || /decommission|not found|does not exist/i.test(t))) {
+      // Pasar a otro modelo si este no existe/está retirado, saturado o el mensaje es muy grande
+      if (!(r.status === 404 || r.status === 429 || r.status === 413 || /decommission|not found|does not exist|too large/i.test(t))) {
         return json(r.status, { error: lastErr })
       }
     } catch (e) {
