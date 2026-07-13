@@ -1,13 +1,12 @@
-// Función serverless: proxy a la API de Google Gemini (capa GRATUITA, sin tarjeta).
-// La GEMINI_API_KEY vive aquí, nunca en el navegador.
-// Consigue la clave gratis en https://aistudio.google.com/app/apikey
+// Función serverless: proxy a Groq (IA gratuita, rápida, funciona en Europa sin tarjeta).
+// La GROQ_API_KEY vive aquí, nunca en el navegador.
+// Consigue la clave gratis en https://console.groq.com/keys
 
-// Se prueban varios modelos por orden. Si uno no existe (404) o está saturado (429),
-// pasa al siguiente automáticamente. Cada modelo tiene su propio cupo gratuito.
-const MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash-lite', 'gemini-1.5-flash-latest']
+// Se prueban varios modelos por orden; si Groq retira uno, usa el siguiente.
+const MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama3-70b-8192']
 const SYSTEM = 'Eres un experto en recursos humanos y redacción de candidaturas. Escribes textos claros, honestos y persuasivos. Nunca inventas titulaciones o experiencias que el candidato no tiene.'
 
-function buildPrompt(task, profile) {
+function buildUserPrompt(task, profile) {
   const cvs = (profile?.docs || [])
     .filter((d) => d.type === 'cv')
     .map((d) => `# CV (${d.sector || 'general'} — ${d.title})\n${d.text || ''}`)
@@ -39,41 +38,43 @@ function buildPrompt(task, profile) {
 
 export async function handler(event) {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Método no permitido' })
-  const key = process.env.GEMINI_API_KEY
-  if (!key) return json(500, { error: 'Falta GEMINI_API_KEY en Netlify. Consíguela gratis en aistudio.google.com/app/apikey' })
+  const key = process.env.GROQ_API_KEY
+  if (!key) return json(500, { error: 'Falta GROQ_API_KEY en Netlify. Consíguela gratis en console.groq.com/keys' })
 
   let payload
   try { payload = JSON.parse(event.body || '{}') } catch { return json(400, { error: 'JSON inválido' }) }
   const { task, profile } = payload
   if (!task) return json(400, { error: 'Falta "task"' })
 
-  const body = JSON.stringify({
-    systemInstruction: { parts: [{ text: SYSTEM }] },
-    contents: [{ role: 'user', parts: [{ text: buildPrompt(task, profile) }] }],
-    generationConfig: { temperature: 0.7, maxOutputTokens: 1800 },
-  })
+  const messages = [
+    { role: 'system', content: SYSTEM },
+    { role: 'user', content: buildUserPrompt(task, profile) },
+  ]
 
   let lastErr = ''
   for (const model of MODELS) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
     try {
-      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+      const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1800 }),
+      })
       if (r.ok) {
         const data = await r.json()
-        const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('\n').trim()
+        const text = (data.choices?.[0]?.message?.content || '').trim()
         return json(200, { text: text || 'La IA no devolvió texto. Inténtalo de nuevo.' })
       }
       const t = await r.text()
-      lastErr = `Gemini (${model}): ${t.slice(0, 200)}`
-      // Probamos otro modelo si este no existe (404) o está saturado (429)
-      if (!(r.status === 404 || r.status === 429 || /not found|not supported|quota/i.test(t))) {
+      lastErr = `Groq (${model}): ${t.slice(0, 200)}`
+      // Pasar a otro modelo si este no existe/está retirado o saturado
+      if (!(r.status === 404 || r.status === 429 || /decommission|not found|does not exist/i.test(t))) {
         return json(r.status, { error: lastErr })
       }
     } catch (e) {
       lastErr = String(e.message || e)
     }
   }
-  return json(429, { error: 'La IA gratuita ha alcanzado su límite de uso por ahora. Espera un minuto y vuelve a intentarlo. Si sigue sin funcionar, puede ser el límite diario gratuito (se reinicia cada día).' })
+  return json(502, { error: 'La IA no está disponible ahora mismo. Inténtalo de nuevo en un momento. ' + lastErr })
 }
 
 function json(status, body) {

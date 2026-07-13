@@ -24,7 +24,7 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
       if (kind === 'adaptCV') setCv(text)
       else setLetter(text)
     } catch (e) {
-      setErr(e.message || 'Error al generar. Revisa la GEMINI_API_KEY en Netlify.')
+      setErr(e.message || 'Error al generar. Revisa la GROQ_API_KEY en Netlify.')
     } finally { setBusy('') }
   }
 

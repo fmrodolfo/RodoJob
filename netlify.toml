@@ -11,7 +11,7 @@
 
 [[redirects]]
   from = "/api/ai"
-  to = "/.netlify/functions/gemini"
+  to = "/.netlify/functions/groq"
   status = 200
 
 [[redirects]]
