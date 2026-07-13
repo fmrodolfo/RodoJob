@@ -34,11 +34,11 @@ export default function ProfileGate({ onEnter }) {
           <p className="page-sub">Cada perfil es independiente. Puedes crear uno para ti y otro para un familiar.</p>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 14 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 14, maxWidth: 440, margin: '0 auto' }}>
           {profiles.map((p) => (
             <motion.button key={p.id} whileHover={{ y: -4 }} whileTap={{ scale: 0.96 }}
               onClick={() => { setActiveId(p.id); onEnter() }}
-              className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              className="card" style={{ width: 132, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
               {p.photoURL
                 ? <img src={p.photoURL} className="avatar-mini" style={{ width: 66, height: 66 }} alt="" />
                 : <div className="avatar-mini placeholder" style={{ width: 66, height: 66, fontSize: 24 }}>
@@ -50,7 +50,7 @@ export default function ProfileGate({ onEnter }) {
 
           <motion.button whileHover={{ y: -4 }} whileTap={{ scale: 0.96 }}
             onClick={() => setCreating(true)}
-            className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, cursor: 'pointer', borderStyle: 'dashed' }}>
+            className="card" style={{ width: 132, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, cursor: 'pointer', borderStyle: 'dashed' }}>
             <div className="avatar-mini placeholder" style={{ width: 66, height: 66 }}>
               <Plus size={26} />
             </div>

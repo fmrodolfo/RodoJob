@@ -98,8 +98,10 @@ export async function searchCompanies({ where, sector }) {
   return res.json()
 }
 
-export async function geocodeCity(q) {
-  const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`)
+export async function geocodeCity(q, country) {
+  const params = new URLSearchParams({ q })
+  if (country) params.set('country', country)
+  const res = await fetch(`/api/geocode?${params.toString()}`)
   if (!res.ok) return []
   return res.json()
 }

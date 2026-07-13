@@ -5,9 +5,11 @@ const UA = 'RodoJob/1.0 (job search helper)'
 
 export async function handler(event) {
   const q = (event.queryStringParameters?.q || '').trim()
+  const country = (event.queryStringParameters?.country || '').trim().toLowerCase()
   if (q.length < 2) return json(200, [])
 
-  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&featuretype=city&q=${encodeURIComponent(q)}`
+  let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&featuretype=city&q=${encodeURIComponent(q)}`
+  if (country) url += `&countrycodes=${encodeURIComponent(country)}`
   try {
     const r = await fetch(url, { headers: { 'User-Agent': UA } })
     if (!r.ok) return json(200, [])

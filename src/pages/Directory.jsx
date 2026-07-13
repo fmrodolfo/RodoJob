@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
-import { searchCompanies, SECTORS } from '../lib/api'
-import { Search as SearchIcon, ExternalLink, Check, Sparkles, Building2, Mail } from 'lucide-react'
+import { searchCompanies, SECTORS, COUNTRIES } from '../lib/api'
+import { Search as SearchIcon, ExternalLink, Check, Sparkles, Building2, Mail, Globe } from 'lucide-react'
 import CandidacyModal from '../components/CandidacyModal'
 import CityPicker from '../components/CityPicker'
 
@@ -11,6 +11,7 @@ const compKey = (c) => (c.name + '|' + c.location).toLowerCase().replace(/\W/g, 
 export default function DirectoryPage() {
   const { contacts, addContact, deleteContact } = useApp()
   const [cities, setCities] = useState([])
+  const [country, setCountry] = useState('ch')
   const [sector, setSector] = useState('restaurantes')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
@@ -56,8 +57,14 @@ export default function DirectoryPage() {
 
       <div className="card">
         <div className="field">
+          <label><Globe size={13} style={{ verticalAlign: -2 }} /> País</label>
+          <select className="select" value={country} onChange={(e) => { setCountry(e.target.value); setCities([]) }}>
+            {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="field">
           <label>¿Dónde? Escribe y elige ciudades de la lista</label>
-          <CityPicker cities={cities} onChange={setCities} placeholder="Ginebra, Lausana, Barcelona…" />
+          <CityPicker cities={cities} onChange={setCities} country={country} placeholder="Ginebra, Lausana, Barcelona…" />
         </div>
         <div className="field">
           <label>Sector</label>

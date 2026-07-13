@@ -3,7 +3,7 @@ import { MapPin, X } from 'lucide-react'
 import { geocodeCity } from '../lib/api'
 
 // Selector de ciudades con autocompletado (sugerencias reales) y chips seleccionados.
-export default function CityPicker({ cities, onChange, placeholder }) {
+export default function CityPicker({ cities, onChange, placeholder, country }) {
   const [q, setQ] = useState('')
   const [sug, setSug] = useState([])
   const [open, setOpen] = useState(false)
@@ -16,12 +16,12 @@ export default function CityPicker({ cities, onChange, placeholder }) {
     setLoading(true)
     clearTimeout(timer.current)
     timer.current = setTimeout(async () => {
-      try { const r = await geocodeCity(q.trim()); setSug(r); setOpen(true) }
+      try { const r = await geocodeCity(q.trim(), country); setSug(r); setOpen(true) }
       catch { setSug([]) }
       finally { setLoading(false) }
     }, 350)
     return () => clearTimeout(timer.current)
-  }, [q])
+  }, [q, country])
 
   // cerrar el desplegable al hacer clic fuera
   useEffect(() => {

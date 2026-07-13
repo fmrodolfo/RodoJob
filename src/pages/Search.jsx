@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
 import { searchJobs, portalLinks, rolesFromDocs, aiJobTerms, COUNTRIES, DATE_FILTERS } from '../lib/api'
-import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase } from 'lucide-react'
+import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase, X } from 'lucide-react'
 import CandidacyModal from '../components/CandidacyModal'
 import CityPicker from '../components/CityPicker'
 
 export default function SearchPage() {
-  const { activeProfile, docs, markApplied, isApplied } = useApp()
+  const { activeProfile, docs, markApplied, isApplied, markDismissed, isDismissed } = useApp()
 
   const [refine, setRefine] = useState('')
   const [cities, setCities] = useState([])
@@ -73,7 +73,7 @@ export default function SearchPage() {
     } finally { setLoading(false); setStatusMsg('') }
   }
 
-  const visible = results.filter((j) => !isApplied(j))
+  const visible = results.filter((j) => !isApplied(j) && !isDismissed(j))
   const links = portalLinks(country, termsUsed[0] || '', cities[0] || '')
 
   return (
@@ -89,15 +89,15 @@ export default function SearchPage() {
         )}
 
         <div className="field">
-          <label>Ciudad(es) — escribe y elige de la lista</label>
-          <CityPicker cities={cities} onChange={setCities} placeholder="Ginebra, Lausana, Berna…" />
+          <label><Globe size={13} style={{ verticalAlign: -2 }} /> País</label>
+          <select className="select" value={country} onChange={(e) => { setCountry(e.target.value); setCities([]) }}>
+            {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+          </select>
         </div>
 
         <div className="field">
-          <label><Globe size={13} style={{ verticalAlign: -2 }} /> País</label>
-          <select className="select" value={country} onChange={(e) => setCountry(e.target.value)}>
-            {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
-          </select>
+          <label>Ciudad(es) — escribe y elige de la lista</label>
+          <CityPicker cities={cities} onChange={setCities} country={country} placeholder="Ginebra, Lausana, Berna…" />
         </div>
 
         <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: 'var(--sky-700)', display: 'block' }}>Publicadas hace</label>
@@ -164,6 +164,7 @@ export default function SearchPage() {
               <a className="btn sm" href={job.redirect_url} target="_blank" rel="noreferrer">Ver y aplicar <ExternalLink size={15} /></a>
               <button className="btn sm ghost" onClick={() => setCandidacyJob(job)}><Sparkles size={15} /> Preparar con IA</button>
               <button className="btn sm ghost" onClick={() => markApplied(job)}><Check size={15} /> Ya apliqué</button>
+              <button className="btn sm ghost" onClick={() => markDismissed(job)} title="No me interesa"><X size={15} /> Descartar</button>
             </div>
           </motion.div>
         ))}

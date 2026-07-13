@@ -54,6 +54,7 @@ export function AppProvider({ children }) {
   const [docs, setDocs] = useState([])
   const [applied, setApplied] = useState([])
   const [contacts, setContacts] = useState([])
+  const [dismissed, setDismissed] = useState([])
 
   // --- Auth ---
   useEffect(() => {
@@ -82,7 +83,7 @@ export function AppProvider({ children }) {
 
   // --- Subcolecciones del perfil activo ---
   useEffect(() => {
-    if (!user || !activeId) { setDocs([]); setApplied([]); setContacts([]); return }
+    if (!user || !activeId) { setDocs([]); setApplied([]); setContacts([]); setDismissed([]); return }
     const p = ['users', user.uid, 'profiles', activeId]
     const unsubs = [
       onSnapshot(collection(db, ...p, 'docs'), (s) =>
@@ -91,6 +92,8 @@ export function AppProvider({ children }) {
         setApplied(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, ...p, 'contacts'), (s) =>
         setContacts(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(collection(db, ...p, 'dismissed'), (s) =>
+        setDismissed(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
     ]
     return () => unsubs.forEach((u) => u())
   }, [user, activeId])
@@ -153,6 +156,17 @@ export function AppProvider({ children }) {
 
   const isApplied = useCallback((job) => applied.some((a) => a.id === jobKey(job)), [applied])
 
+  // --- Descartadas (ofertas que no interesan; no vuelven a salir) ---
+  const markDismissed = useCallback(async (job) => {
+    if (!user || !activeId) return
+    const key = jobKey(job)
+    await setDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'dismissed', key), {
+      title: job.title, company: job.company, dismissedAt: serverTimestamp(),
+    })
+  }, [user, activeId])
+
+  const isDismissed = useCallback((job) => dismissed.some((d) => d.id === jobKey(job)), [dismissed])
+
   // --- Contactos (empresas / hoteles / restaurantes) ---
   const addContact = useCallback(async (data) => {
     if (!user || !activeId) return
@@ -177,6 +191,7 @@ export function AppProvider({ children }) {
     createProfile, updateProfile, deleteProfile,
     docs, addDocItem, deleteDocItem,
     applied, markApplied, unmarkApplied, isApplied,
+    dismissed, markDismissed, isDismissed,
     contacts, addContact, toggleContactSent, deleteContact,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

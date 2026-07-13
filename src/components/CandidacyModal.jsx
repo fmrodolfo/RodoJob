@@ -12,6 +12,7 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
   const [letter, setLetter] = useState('')
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
+  const [language, setLanguage] = useState('auto')
 
   const hasCV = docs.some((d) => d.type === 'cv')
   const profilePayload = { name: activeProfile?.name, docs }
@@ -19,7 +20,7 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
   async function gen(kind) {
     setErr(''); setBusy(kind)
     try {
-      const text = await askAI({ task: { kind, job }, profile: profilePayload })
+      const text = await askAI({ task: { kind, job, language }, profile: profilePayload })
       if (kind === 'adaptCV') setCv(text)
       else setLetter(text)
     } catch (e) {
@@ -49,6 +50,19 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
           </div>
         )}
         {err && <div className="card" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c', marginBottom: 14 }}>{err}</div>}
+
+        <div className="field">
+          <label>¿En qué idioma quieres el CV y la carta?</label>
+          <select className="select" value={language} onChange={(e) => setLanguage(e.target.value)}>
+            <option value="auto">Automático (según la oferta)</option>
+            <option value="español">Español</option>
+            <option value="francés">Francés</option>
+            <option value="alemán">Alemán</option>
+            <option value="italiano">Italiano</option>
+            <option value="inglés">Inglés</option>
+            <option value="portugués">Portugués</option>
+          </select>
+        </div>
 
         <div className="row" style={{ marginBottom: 16 }}>
           <button className="btn sm" onClick={() => gen('adaptCV')} disabled={!hasCV || busy}>
