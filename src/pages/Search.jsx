@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
-import { searchJobs, portalLinks, rolesFromDocs, aiJobTerms, COUNTRIES, DATE_FILTERS } from '../lib/api'
+import { searchJobs, portalLinks, rolesFromDocs, aiJobSearch, COUNTRIES, DATE_FILTERS } from '../lib/api'
 import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase, X } from 'lucide-react'
 import CandidacyModal from '../components/CandidacyModal'
 import CityPicker from '../components/CityPicker'
@@ -27,24 +27,24 @@ export default function SearchPage() {
   const countryName = COUNTRIES.find((c) => c.code === country)?.name || ''
 
   async function decideTerms() {
-    if (refine.trim()) return [refine.trim()]
-    // La IA lee el CV y da puestos en el idioma del país
+    if (refine.trim()) return { terms: [refine.trim()], category: '' }
+    // La IA lee el CV y da puestos en el idioma del país + categoría del sector
     try {
-      const terms = await aiJobTerms({
+      const r = await aiJobSearch({
         profile: { name: activeProfile?.name, docs },
         country: countryName, city: cities[0],
       })
-      if (terms.length) return terms
+      if (r.terms.length) return r
     } catch { /* si falla la IA, usamos lo derivado del CV */ }
     const roles = rolesFromDocs(docs)
-    return roles.length ? roles : ['empleo']
+    return { terms: roles.length ? roles : ['empleo'], category: '' }
   }
 
-  async function runSearch(terms, cityList) {
+  async function runSearch(terms, cityList, category) {
     const all = []; const seen = new Set()
     for (const city of cityList) {
       for (const t of terms) {
-        const data = await searchJobs({ what: t, where: city, country, maxDaysOld: maxDays })
+        const data = await searchJobs({ what: t, where: city, country, maxDaysOld: maxDays, category })
         for (const j of (data.results || [])) {
           const k = j.redirect_url || j.id
           if (!seen.has(k)) { seen.add(k); all.push(j) }
@@ -58,26 +58,21 @@ export default function SearchPage() {
     setLoading(true); setErr(''); setNote(''); setSearched(true)
     try {
       setStatusMsg(refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tu CV…')
-      const terms = await decideTerms()
+      const { terms, category } = await decideTerms()
       setTermsUsed(terms)
       setStatusMsg('Buscando ofertas…')
-      let all = await runSearch(terms, cities.length ? cities : [''])
+      const cityList = cities.length ? cities : ['']
+      // 1) puestos + categoría del sector (evita colar ofertas de otro sector)
+      let all = await runSearch(terms, cityList, category)
+      // 2) sin ciudad pero con categoría
       if (all.length === 0 && cities.length) {
-        // respaldo 1: buscar en todo el país si la ciudad no dio resultados
-        all = await runSearch(terms, [''])
+        all = await runSearch(terms, [''], category)
         if (all.length) setNote(`No encontré ofertas exactamente en ${cities.join(', ')}; te muestro las de todo el país (${countryName}).`)
       }
-      if (all.length === 0) {
-        // respaldo 2: simplificar a palabras sueltas más generales
-        const simple = [...new Set(terms.flatMap((t) => {
-          const w = t.split(/\s+/).filter((x) => x.length > 2)
-          return w.length ? [w[0], w[w.length - 1]] : []
-        }))]
-        if (simple.length) {
-          all = await runSearch(simple, cities.length ? cities : [''])
-          if (all.length === 0 && cities.length) all = await runSearch(simple, [''])
-          if (all.length) { setTermsUsed(simple); setNote(`Afiné la búsqueda a términos más generales para encontrarte ofertas.`) }
-        }
+      // 3) sin categoría (por si el sector filtraba demasiado)
+      if (all.length === 0 && category) {
+        all = await runSearch(terms, cityList, '')
+        if (all.length === 0 && cities.length) all = await runSearch(terms, [''], '')
       }
       setResults(all)
     } catch (e) {

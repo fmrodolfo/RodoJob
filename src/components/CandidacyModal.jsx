@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useApp } from '../context/AppContext'
-import { askAI } from '../lib/api'
-import { textToPdf } from '../lib/pdf'
-import { X, Sparkles, FileDown, ExternalLink, Check, FileText, Mail } from 'lucide-react'
+import { askAI, aiCvFields } from '../lib/api'
+import { cvToPdf, letterToPdf } from '../lib/pdf'
+import { fillDocxTemplate } from '../lib/docx'
+import { X, Sparkles, FileDown, ExternalLink, Check, FileText, Mail, Copy, FileType2 } from 'lucide-react'
 
 // Genera CV y carta adaptados a UNA oferta concreta (solo si el usuario lo pide).
 export default function CandidacyModal({ job, onClose, onApplied, companyMode = false }) {
-  const { activeProfile, docs } = useApp()
+  const { activeProfile, docs, getCvTemplate } = useApp()
   const [cv, setCv] = useState('')
   const [letter, setLetter] = useState('')
   const [busy, setBusy] = useState('')
@@ -25,6 +26,21 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
       else setLetter(text)
     } catch (e) {
       setErr(e.message || 'Error al generar. Revisa la GROQ_API_KEY en Netlify.')
+    } finally { setBusy('') }
+  }
+
+  async function genWord() {
+    setErr(''); setBusy('word')
+    try {
+      const base64 = await getCvTemplate()
+      if (!base64) { setErr('No tienes plantilla Word guardada. Súbela en tu perfil.'); return }
+      const fields = await aiCvFields({ profile: profilePayload, job, language })
+      fillDocxTemplate(base64, {
+        titulo: fields.titulo, perfil: fields.perfil,
+        puesto: job.title, empresa: job.company, lugar: job.location,
+      }, `CV_${slug(job.company)}.docx`)
+    } catch (e) {
+      setErr(e.message || 'No se pudo generar el CV en Word. Revisa que las marcas {titulo} y {perfil} estén bien escritas en tu plantilla.')
     } finally { setBusy('') }
   }
 
@@ -64,9 +80,15 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
           </select>
         </div>
 
+        {activeProfile?.cvTemplateName && (
+          <button className="btn block" style={{ marginBottom: 12 }} onClick={genWord} disabled={busy}>
+            {busy === 'word' ? <span className="spinner" /> : <><FileType2 size={16} /> Descargar mi CV en Word (con mi diseño)</>}
+          </button>
+        )}
+
         <div className="row" style={{ marginBottom: 16 }}>
           <button className="btn sm" onClick={() => gen('adaptCV')} disabled={!hasCV || busy}>
-            {busy === 'adaptCV' ? <span className="spinner" /> : <><Sparkles size={15} /> Adaptar CV</>}
+            {busy === 'adaptCV' ? <span className="spinner" /> : <><Sparkles size={15} /> Adaptar CV (texto/PDF)</>}
           </button>
           <button className="btn sm" onClick={() => gen('coverLetter')} disabled={!hasCV || busy}>
             {busy === 'coverLetter' ? <span className="spinner" /> : <><Sparkles size={15} /> Generar carta</>}
@@ -75,11 +97,11 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
 
         {cv && (
           <Result icon={<FileText size={16} />} title="CV adaptado" text={cv} onChange={setCv}
-            onPdf={() => textToPdf({ title: `CV — ${activeProfile?.name || ''}`, subtitle: `${job.title} · ${job.company}`, body: cv, filename: `CV_${slug(job.company)}.pdf` })} />
+            onPdf={() => cvToPdf({ name: activeProfile?.name, jobTitle: job.title, contact: '', body: cv, photoDataUrl: activeProfile?.photoURL, filename: `CV_${slug(job.company)}.pdf` })} />
         )}
         {letter && (
           <Result icon={<Mail size={16} />} title="Carta de motivación" text={letter} onChange={setLetter}
-            onPdf={() => textToPdf({ title: `Carta de motivación`, subtitle: `${job.title} · ${job.company}`, body: letter, filename: `Carta_${slug(job.company)}.pdf` })} />
+            onPdf={() => letterToPdf({ subtitle: `${job.title} · ${job.company}`, body: letter, filename: `Carta_${slug(job.company)}.pdf` })} />
         )}
 
         <div className="row" style={{ marginTop: 18 }}>
@@ -94,13 +116,22 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
 }
 
 function Result({ icon, title, text, onChange, onPdf }) {
+  const [copied, setCopied] = useState(false)
+  function copy() {
+    navigator.clipboard.writeText(text)
+    setCopied(true); setTimeout(() => setCopied(false), 1500)
+  }
   return (
     <div className="card" style={{ marginBottom: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
         <b style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{icon} {title}</b>
-        <button className="btn sm" onClick={onPdf}><FileDown size={15} /> PDF</button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn sm ghost" onClick={copy}>{copied ? <><Check size={15} /> Copiado</> : <><Copy size={15} /> Copiar texto</>}</button>
+          <button className="btn sm" onClick={onPdf}><FileDown size={15} /> PDF</button>
+        </div>
       </div>
       <textarea className="textarea" value={text} onChange={(e) => onChange(e.target.value)} style={{ minHeight: 200 }} />
+      <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>Puedes editar el texto antes de copiarlo o descargarlo.</p>
     </div>
   )
 }

@@ -5,7 +5,7 @@ import {
   createUserWithEmailAndPassword, signOut,
 } from 'firebase/auth'
 import {
-  collection, doc, setDoc, addDoc, deleteDoc, updateDoc,
+  collection, doc, setDoc, addDoc, deleteDoc, updateDoc, getDoc,
   onSnapshot, serverTimestamp, query, orderBy,
 } from 'firebase/firestore'
 
@@ -185,6 +185,25 @@ export function AppProvider({ children }) {
     await deleteDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'contacts', id))
   }, [user, activeId])
 
+  // --- Plantilla de CV en Word (.docx) ---
+  const saveCvTemplate = useCallback(async (base64, name) => {
+    if (!user || !activeId) return
+    await setDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'assets', 'cvTemplate'), { data: base64, name })
+    await updateDoc(doc(db, 'users', user.uid, 'profiles', activeId), { cvTemplateName: name })
+  }, [user, activeId])
+
+  const getCvTemplate = useCallback(async () => {
+    if (!user || !activeId) return null
+    const snap = await getDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'assets', 'cvTemplate'))
+    return snap.exists() ? snap.data().data : null
+  }, [user, activeId])
+
+  const deleteCvTemplate = useCallback(async () => {
+    if (!user || !activeId) return
+    await deleteDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'assets', 'cvTemplate'))
+    await updateDoc(doc(db, 'users', user.uid, 'profiles', activeId), { cvTemplateName: '' })
+  }, [user, activeId])
+
   const value = {
     firebaseReady, user, authLoading, login, register, logout,
     profiles, activeId, setActiveId, activeProfile,
@@ -193,6 +212,7 @@ export function AppProvider({ children }) {
     applied, markApplied, unmarkApplied, isApplied,
     dismissed, markDismissed, isDismissed,
     contacts, addContact, toggleContactSent, deleteContact,
+    saveCvTemplate, getCvTemplate, deleteCvTemplate,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

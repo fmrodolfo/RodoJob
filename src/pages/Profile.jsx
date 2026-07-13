@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
-import { FileText, Mail, Trash2, Plus, Camera, LogOut, Save, X } from 'lucide-react'
+import { FileText, Mail, Trash2, Plus, Camera, LogOut, Save, X, FileType2 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
@@ -19,7 +19,7 @@ async function extractPdfText(file) {
 }
 
 export default function ProfilePage() {
-  const { activeProfile, updateProfile, logout, docs, addDocItem, deleteDocItem } = useApp()
+  const { activeProfile, updateProfile, logout, docs, addDocItem, deleteDocItem, saveCvTemplate, deleteCvTemplate } = useApp()
   const [name, setName] = useState(activeProfile?.name || '')
   const [photo, setPhoto] = useState(null)
   const [preview, setPreview] = useState('')
@@ -76,6 +76,8 @@ export default function ProfilePage() {
         {cartas.map((d) => <DocRow key={d.id} d={d} onDelete={() => deleteDocItem(d.id)} icon={<Mail size={18} />} />)}
       </div>
 
+      <CvTemplateCard profile={activeProfile} onSave={saveCvTemplate} onDelete={deleteCvTemplate} />
+
       <button className="btn ghost block" style={{ marginTop: 14 }} onClick={logout}><LogOut size={16} /> Cerrar sesión</button>
 
       <AnimatePresence>
@@ -96,6 +98,57 @@ function DocRow({ d, onDelete, icon }) {
         </div>
       </div>
       <button onClick={onDelete} style={{ background: 'none', color: '#dc2626' }}><Trash2 size={17} /></button>
+    </div>
+  )
+}
+
+function CvTemplateCard({ profile, onSave, onDelete }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  async function pick(e) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    if (!f.name.toLowerCase().endsWith('.docx')) { setMsg('Debe ser un archivo .docx (Word).'); return }
+    setBusy(true); setMsg('Guardando plantilla…')
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader()
+        r.onload = () => res(String(r.result).split(',')[1])
+        r.onerror = rej
+        r.readAsDataURL(f)
+      })
+      if (base64.length > 950000) { setMsg('El archivo es demasiado grande. Prueba con un .docx más ligero (menos imágenes).'); setBusy(false); return }
+      await onSave(base64, f.name)
+      setMsg('')
+    } catch { setMsg('No se pudo guardar la plantilla.') } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <FileType2 size={18} /> Plantilla de CV en Word
+      </h3>
+      <p className="muted" style={{ fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+        Sube tu CV en <b>.docx</b> con tu diseño. Donde quieras que la IA adapte el texto a cada oferta, escribe estas marcas
+        en tu Word: <code>{'{titulo}'}</code> (tu puesto) y <code>{'{perfil}'}</code> (tu resumen). La app respeta tu diseño y solo rellena esas marcas.
+      </p>
+
+      {profile?.cvTemplateName ? (
+        <div className="doc-pill">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <span style={{ color: 'var(--sky-600)' }}><FileType2 size={18} /></span>
+            <b style={{ fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{profile.cvTemplateName}</b>
+          </div>
+          <button onClick={onDelete} style={{ background: 'none', color: '#dc2626' }}><Trash2 size={17} /></button>
+        </div>
+      ) : (
+        <label className="btn sm ghost block" style={{ cursor: 'pointer' }}>
+          {busy ? <span className="spinner dark" /> : <><Plus size={16} /> Subir plantilla .docx</>}
+          <input type="file" accept=".docx" onChange={pick} style={{ display: 'none' }} disabled={busy} />
+        </label>
+      )}
+      {msg && <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>{msg}</p>}
     </div>
   )
 }

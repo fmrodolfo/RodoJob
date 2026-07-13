@@ -83,9 +83,10 @@ export function rolesFromDocs(docs) {
   return [...new Set(roles)]
 }
 
-export async function searchJobs({ what, where, country, maxDaysOld }) {
+export async function searchJobs({ what, where, country, maxDaysOld, category }) {
   const params = new URLSearchParams({ what, where, country })
   if (maxDaysOld && maxDaysOld !== 'any') params.set('max_days_old', String(maxDaysOld))
+  if (category) params.set('category', category)
   const res = await fetch(`/api/jobs?${params.toString()}`)
   if (!res.ok) throw new Error((await res.text().catch(() => '')) || `Error ${res.status} al buscar ofertas`)
   return res.json()
@@ -106,14 +107,30 @@ export async function geocodeCity(q, country) {
   return res.json()
 }
 
-// La IA lee el CV y devuelve puestos a buscar EN EL IDIOMA del país destino.
-export async function aiJobTerms({ profile, country, city }) {
+// La IA lee el CV y devuelve puestos (idioma del país) + una categoría de Adzuna.
+export async function aiJobSearch({ profile, country, city }) {
   const text = await askAI({ task: { kind: 'jobTerms', country, city }, profile })
-  return text
+  let termsPart = text, category = ''
+  const pipe = text.split('|')
+  if (pipe.length > 1) { termsPart = pipe[0]; category = pipe[1].trim().toLowerCase().replace(/[^a-z-]/g, '') }
+  const terms = termsPart
     .split(/[,\n]/)
     .map((s) => s.replace(/^[-\d.\s]+/, '').trim().toLowerCase())
     .filter(Boolean)
     .slice(0, 3)
+  return { terms, category }
+}
+
+// La IA genera solo el título y el perfil adaptados (para rellenar tu plantilla Word).
+export async function aiCvFields({ profile, job, language }) {
+  const text = await askAI({ task: { kind: 'cvFields', job, language }, profile })
+  const m = text.match(/\{[\s\S]*\}/)
+  try {
+    const o = JSON.parse(m ? m[0] : text)
+    return { titulo: (o.titulo || '').trim(), perfil: (o.perfil || '').trim() }
+  } catch {
+    return { titulo: job.title || '', perfil: text.replace(/[{}"]/g, '').slice(0, 400).trim() }
+  }
 }
 
 export async function askAI({ task, profile }) {

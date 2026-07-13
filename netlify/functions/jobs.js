@@ -27,6 +27,8 @@ export async function handler(event) {
   if (where) url.searchParams.set('where', where)
   const maxDays = p.max_days_old
   if (maxDays && /^\d+$/.test(maxDays)) url.searchParams.set('max_days_old', maxDays)
+  const category = p.category
+  if (category) url.searchParams.set('category', category)
 
   try {
     const r = await fetch(url.toString())
