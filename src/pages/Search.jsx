@@ -63,9 +63,21 @@ export default function SearchPage() {
       setStatusMsg('Buscando ofertas…')
       let all = await runSearch(terms, cities.length ? cities : [''])
       if (all.length === 0 && cities.length) {
-        // respaldo: buscar en todo el país si la ciudad no dio resultados
+        // respaldo 1: buscar en todo el país si la ciudad no dio resultados
         all = await runSearch(terms, [''])
         if (all.length) setNote(`No encontré ofertas exactamente en ${cities.join(', ')}; te muestro las de todo el país (${countryName}).`)
+      }
+      if (all.length === 0) {
+        // respaldo 2: simplificar a palabras sueltas más generales
+        const simple = [...new Set(terms.flatMap((t) => {
+          const w = t.split(/\s+/).filter((x) => x.length > 2)
+          return w.length ? [w[0], w[w.length - 1]] : []
+        }))]
+        if (simple.length) {
+          all = await runSearch(simple, cities.length ? cities : [''])
+          if (all.length === 0 && cities.length) all = await runSearch(simple, [''])
+          if (all.length) { setTermsUsed(simple); setNote(`Afiné la búsqueda a términos más generales para encontrarte ofertas.`) }
+        }
       }
       setResults(all)
     } catch (e) {
