@@ -53,7 +53,7 @@ export default function SearchPage() {
       if (!selectedCvs.length) { setErr('Selecciona al menos un CV para buscar.'); setLoading(false); return }
       setStatusMsg(refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tus CVs…')
 
-      // Consultas por CV: categoría del sector = máximo volumen relevante
+      // Consultas por CV: buscamos por los PUESTOS que la IA saca del CV (fiable por sector)
       const queries = []; const display = []
       if (refine.trim()) {
         queries.push({ what: refine.trim(), category: '' })
@@ -62,9 +62,8 @@ export default function SearchPage() {
           let r
           try { r = await aiJobSearch({ profile: { name: activeProfile?.name, docs: [cv] }, country: countryName, city: cities[0]?.name }) }
           catch { r = { terms: rolesFromDocs([cv]), category: '' } }
-          ;(r.terms || []).forEach((t) => display.push(t))
-          if (r.category) queries.push({ what: '', category: r.category })
-          else ((r.terms && r.terms.length) ? r.terms : rolesFromDocs([cv])).slice(0, 2).forEach((t) => queries.push({ what: t, category: '' }))
+          const terms = (r.terms && r.terms.length) ? r.terms : rolesFromDocs([cv])
+          terms.slice(0, 3).forEach((t) => { display.push(t); queries.push({ what: t, category: '' }) })
         }
       }
       const queriesU = uniqQ(queries)
