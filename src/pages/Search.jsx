@@ -2,17 +2,19 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
 import { searchJobs, portalLinks, rolesFromDocs, aiJobSearch, COUNTRIES, DATE_FILTERS } from '../lib/api'
-import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase, X } from 'lucide-react'
+import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase, X, Folder } from 'lucide-react'
 import CandidacyModal from '../components/CandidacyModal'
 import CityPicker from '../components/CityPicker'
 
 export default function SearchPage() {
   const { activeProfile, docs, markApplied, isApplied, markDismissed, isDismissed } = useApp()
+  const cvs = docs.filter((d) => d.type === 'cv')
 
   const [refine, setRefine] = useState('')
   const [cities, setCities] = useState([])
   const [country, setCountry] = useState('ch')
   const [maxDays, setMaxDays] = useState('any')
+  const [deselected, setDeselected] = useState([])
 
   const [results, setResults] = useState([])
   const [termsUsed, setTermsUsed] = useState([])
@@ -23,57 +25,59 @@ export default function SearchPage() {
   const [searched, setSearched] = useState(false)
   const [candidacyJob, setCandidacyJob] = useState(null)
 
-  const hasCV = docs.some((d) => d.type === 'cv')
   const countryName = COUNTRIES.find((c) => c.code === country)?.name || ''
+  const isSel = (id) => !deselected.includes(id)
+  const toggleCv = (id) => setDeselected((d) => d.includes(id) ? d.filter((x) => x !== id) : [...d, id])
+  const selectedCvs = cvs.filter((c) => isSel(c.id))
 
-  async function decideTerms() {
-    if (refine.trim()) return { terms: [refine.trim()], category: '' }
-    // La IA lee el CV y da puestos en el idioma del país + categoría del sector
-    try {
-      const r = await aiJobSearch({
-        profile: { name: activeProfile?.name, docs },
-        country: countryName, city: cities[0],
-      })
-      if (r.terms.length) return r
-    } catch { /* si falla la IA, usamos lo derivado del CV */ }
-    const roles = rolesFromDocs(docs)
-    return { terms: roles.length ? roles : ['empleo'], category: '' }
-  }
-
-  async function runSearch(terms, cityList, category) {
-    const all = []; const seen = new Set()
+  async function fetchJobs(terms, cityList, category) {
+    const out = []
     for (const city of cityList) {
       for (const t of terms) {
         const data = await searchJobs({ what: t, where: city, country, maxDaysOld: maxDays, category })
-        for (const j of (data.results || [])) {
-          const k = j.redirect_url || j.id
-          if (!seen.has(k)) { seen.add(k); all.push(j) }
-        }
+        out.push(...(data.results || []))
       }
     }
-    return all
+    return out
   }
 
   async function run() {
     setLoading(true); setErr(''); setNote(''); setSearched(true)
     try {
-      setStatusMsg(refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tu CV…')
-      const { terms, category } = await decideTerms()
-      setTermsUsed(terms)
-      setStatusMsg('Buscando ofertas…')
+      if (!selectedCvs.length) { setErr('Selecciona al menos un CV para buscar.'); setLoading(false); return }
       const cityList = cities.length ? cities : ['']
-      // 1) puestos + categoría del sector (evita colar ofertas de otro sector)
-      let all = await runSearch(terms, cityList, category)
-      // 2) sin ciudad pero con categoría
+      setStatusMsg(refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tus CVs…')
+
+      // Una búsqueda por cada CV seleccionado (cada sector con sus términos y categoría)
+      const searches = []
+      if (refine.trim()) {
+        searches.push({ terms: [refine.trim()], category: '' })
+      } else {
+        for (const cv of selectedCvs) {
+          try {
+            const r = await aiJobSearch({ profile: { name: activeProfile?.name, docs: [cv] }, country: countryName, city: cities[0] })
+            searches.push(r.terms.length ? r : { terms: rolesFromDocs([cv]), category: '' })
+          } catch {
+            searches.push({ terms: rolesFromDocs([cv]), category: '' })
+          }
+        }
+      }
+      setTermsUsed([...new Set(searches.flatMap((s) => s.terms))])
+      setStatusMsg('Buscando ofertas…')
+
+      const seen = new Set(); const all = []
+      const gather = async (cityL, useCat) => {
+        for (const s of searches) {
+          const res = await fetchJobs(s.terms, cityL, useCat ? s.category : '')
+          for (const j of res) { const k = j.redirect_url || j.id; if (!seen.has(k)) { seen.add(k); all.push(j) } }
+        }
+      }
+      await gather(cityList, true)
       if (all.length === 0 && cities.length) {
-        all = await runSearch(terms, [''], category)
+        await gather([''], true)
         if (all.length) setNote(`No encontré ofertas exactamente en ${cities.join(', ')}; te muestro las de todo el país (${countryName}).`)
       }
-      // 3) sin categoría (por si el sector filtraba demasiado)
-      if (all.length === 0 && category) {
-        all = await runSearch(terms, cityList, '')
-        if (all.length === 0 && cities.length) all = await runSearch(terms, [''], '')
-      }
+      if (all.length === 0) { await gather(cityList, false); if (all.length === 0 && cities.length) await gather([''], false) }
       setResults(all)
     } catch (e) {
       setErr(e.message || 'No se pudieron cargar las ofertas.'); setResults([])
@@ -86,13 +90,26 @@ export default function SearchPage() {
   return (
     <div>
       <h1 className="page-title">Ofertas para ti</h1>
-      <p className="page-sub">La IA lee tus CVs y busca ofertas en el idioma del país. No hace falta que escribas el puesto.</p>
+      <p className="page-sub">La IA lee tus CVs y busca ofertas en el idioma del país. Tú eliges con qué CVs buscar.</p>
 
       <div className="card">
-        {!hasCV && (
+        {cvs.length === 0 ? (
           <div className="card" style={{ background: '#fef3c7', border: '1px solid #fde68a', marginBottom: 14 }}>
             Añade un CV en tu perfil (pestaña Perfil) y la IA buscará ofertas por ti.
           </div>
+        ) : (
+          <>
+            <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--sky-700)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Folder size={14} /> Buscar con estos CVs (toca para quitar/poner)
+            </label>
+            <div className="tabs" style={{ marginBottom: 14, flexWrap: 'wrap' }}>
+              {cvs.map((c) => (
+                <span key={c.id} className={`chip ${isSel(c.id) ? 'active' : ''}`} onClick={() => toggleCv(c.id)}>
+                  {isSel(c.id) ? <Check size={13} /> : <X size={13} />} {c.sector || c.title}
+                </span>
+              ))}
+            </div>
+          </>
         )}
 
         <div className="field">
@@ -115,12 +132,12 @@ export default function SearchPage() {
         </div>
 
         <div className="field">
-          <label>Afinar búsqueda (opcional)</label>
+          <label>Afinar búsqueda (opcional — busca solo esto en vez de tus CVs)</label>
           <input className="input" value={refine} onChange={(e) => setRefine(e.target.value)}
             placeholder="p. ej. serveur, ayudante de cocina…" />
         </div>
 
-        <button className="btn block" onClick={run} disabled={loading || !hasCV}>
+        <button className="btn block" onClick={run} disabled={loading || cvs.length === 0}>
           {loading ? <><span className="spinner" /> {statusMsg}</> : <><SearchIcon size={18} /> Buscar ofertas para mí</>}
         </button>
       </div>
@@ -150,7 +167,7 @@ export default function SearchPage() {
       {err && <div className="card" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c' }}>{err}</div>}
 
       {searched && !loading && visible.length === 0 && !err && (
-        <div className="empty"><Briefcase size={40} /><p>No hay ofertas nuevas con estos filtros. Prueba otra ciudad, otra fecha, o escribe un puesto en "Afinar búsqueda".</p></div>
+        <div className="empty"><Briefcase size={40} /><p>No hay ofertas nuevas con estos filtros. Prueba otra ciudad, otra fecha, o los portales de arriba.</p></div>
       )}
 
       <AnimatePresence>
