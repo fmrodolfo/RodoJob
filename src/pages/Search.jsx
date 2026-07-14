@@ -85,9 +85,15 @@ export default function SearchPage() {
 
       const R = 35 // km a la redonda
       let all = raw
-      if (targets.length) {
-        const near = raw.filter((j) => j.latitude != null && j.longitude != null &&
-          targets.some((t) => kmBetween(t.lat, t.lon, j.latitude, j.longitude) <= R))
+      if (cities.length) {
+        // nombres del lugar en varios idiomas (Genève/Genf/Geneva) + cantón
+        const aliasSets = cities.map((c) => (c.aliases && c.aliases.length ? c.aliases : [c.name]).map((a) => a.toLowerCase()))
+        const near = raw.filter((j) => {
+          const coordOk = targets.some((t) => j.latitude != null && j.longitude != null && kmBetween(t.lat, t.lon, j.latitude, j.longitude) <= R)
+          if (coordOk) return true
+          const hay = (String(j.location || '') + ' ' + (Array.isArray(j.area) ? j.area.join(' ') : '')).toLowerCase()
+          return aliasSets.some((al) => al.some((a) => a && hay.includes(a)))
+        })
         if (near.length) all = near
         else { all = raw; setNote(`No pude localizar ofertas justo en ${cities.map((c) => c.name).join(', ')}; te muestro las de todo el país (${countryName}).`) }
       }

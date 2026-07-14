@@ -49,6 +49,7 @@ export async function handler(event) {
       category: j.category?.label || '',
       latitude: j.latitude,
       longitude: j.longitude,
+      area: j.location?.area || [],
     }))
     return json(200, { count: data.count || results.length, results })
   } catch (e) {

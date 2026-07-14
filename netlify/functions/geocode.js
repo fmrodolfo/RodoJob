@@ -8,7 +8,7 @@ export async function handler(event) {
   const country = (event.queryStringParameters?.country || '').trim().toLowerCase()
   if (q.length < 2) return json(200, [])
 
-  let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&featuretype=city&q=${encodeURIComponent(q)}`
+  let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&namedetails=1&limit=6&featuretype=city&q=${encodeURIComponent(q)}`
   if (country) url += `&countrycodes=${encodeURIComponent(country)}`
   try {
     const r = await fetch(url, { headers: { 'User-Agent': UA } })
@@ -23,7 +23,12 @@ export async function handler(event) {
       const key = name.toLowerCase() + '|' + (a.country || '')
       if (seen.has(key)) continue
       seen.add(key)
-      out.push({ name, label: it.display_name, lat: parseFloat(it.lat), lon: parseFloat(it.lon) })
+      const nd = it.namedetails || {}
+      const aliases = [...new Set([
+        name, nd.name, nd['name:fr'], nd['name:de'], nd['name:en'], nd['name:it'],
+        a.city, a.town, a.state, a.county,
+      ].filter((x) => x && x.length > 2))]
+      out.push({ name, label: it.display_name, lat: parseFloat(it.lat), lon: parseFloat(it.lon), aliases })
       if (out.length >= 6) break
     }
     return json(200, out)

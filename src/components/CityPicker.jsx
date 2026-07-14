@@ -31,7 +31,7 @@ export default function CityPicker({ cities, onChange, placeholder, country }) {
 
   function add(item) {
     if (item?.name && !cities.some((c) => c.name === item.name)) {
-      onChange([...cities, { name: item.name, lat: item.lat ?? null, lon: item.lon ?? null }])
+      onChange([...cities, { name: item.name, lat: item.lat ?? null, lon: item.lon ?? null, aliases: item.aliases || [item.name] }])
     }
     setQ(''); setSug([]); setOpen(false)
   }
