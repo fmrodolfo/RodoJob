@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
-import { FileText, Mail, Trash2, Plus, Camera, LogOut, Save, X, FileType2 } from 'lucide-react'
+import { FileText, Trash2, Plus, Camera, LogOut, Save, X, Folder, FileType2, Briefcase } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
@@ -17,9 +17,15 @@ async function extractPdfText(file) {
   }
   return text.trim()
 }
+const fileToBase64 = (f) => new Promise((res, rej) => {
+  const r = new FileReader()
+  r.onload = () => res(String(r.result).split(',')[1])
+  r.onerror = rej
+  r.readAsDataURL(f)
+})
 
 export default function ProfilePage() {
-  const { activeProfile, updateProfile, logout, docs, addDocItem, deleteDocItem, saveCvTemplate, deleteCvTemplate } = useApp()
+  const { activeProfile, updateProfile, logout, docs, addDocItem, deleteDocItem } = useApp()
   const [name, setName] = useState(activeProfile?.name || '')
   const [photo, setPhoto] = useState(null)
   const [preview, setPreview] = useState('')
@@ -37,12 +43,11 @@ export default function ProfilePage() {
   }
 
   const cvs = docs.filter((d) => d.type === 'cv')
-  const cartas = docs.filter((d) => d.type === 'carta')
 
   return (
     <div>
       <h1 className="page-title">Mi perfil</h1>
-      <p className="page-sub">Sube tus CVs (PDF o texto) y cartas. La IA los usa para adaptar tus candidaturas.</p>
+      <p className="page-sub">Sube tus CVs por sector. La IA los lee para buscarte ofertas y para adaptar tus cartas.</p>
 
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -61,127 +66,119 @@ export default function ProfilePage() {
         </button>
       </div>
 
-      <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ fontWeight: 800 }}>Mis documentos</h3>
-          <button className="btn sm" onClick={() => setShowForm(true)}><Plus size={16} /> Añadir</button>
-        </div>
-
-        {docs.length === 0 && <p className="muted" style={{ fontSize: 14 }}>Añade al menos un CV para que la IA pueda ayudarte a buscar y adaptar.</p>}
-
-        {cvs.length > 0 && <p className="muted" style={{ fontSize: 12, fontWeight: 700, margin: '6px 0' }}>CVs</p>}
-        {cvs.map((d) => <DocRow key={d.id} d={d} onDelete={() => deleteDocItem(d.id)} icon={<FileText size={18} />} />)}
-
-        {cartas.length > 0 && <p className="muted" style={{ fontSize: 12, fontWeight: 700, margin: '12px 0 6px' }}>Cartas de motivación</p>}
-        {cartas.map((d) => <DocRow key={d.id} d={d} onDelete={() => deleteDocItem(d.id)} icon={<Mail size={18} />} />)}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '20px 2px 12px' }}>
+        <h3 style={{ fontWeight: 800 }}>Mis CVs por sector</h3>
+        <button className="btn sm" onClick={() => setShowForm(true)}><Plus size={16} /> Añadir CV</button>
       </div>
 
-      <CvTemplateCard profile={activeProfile} onSave={saveCvTemplate} onDelete={deleteCvTemplate} />
+      {cvs.length === 0 && (
+        <div className="empty"><Folder size={40} /><p>Añade tu primer CV. Se creará una carpeta con su sector, donde también podrás poner tu plantilla de carta de motivación.</p></div>
+      )}
 
-      <button className="btn ghost block" style={{ marginTop: 14 }} onClick={logout}><LogOut size={16} /> Cerrar sesión</button>
+      {cvs.map((d) => <CvFolder key={d.id} d={d} onDelete={() => deleteDocItem(d.id)} />)}
+
+      <button className="btn ghost block" style={{ marginTop: 18 }} onClick={logout}><LogOut size={16} /> Cerrar sesión</button>
 
       <AnimatePresence>
-        {showForm && <DocForm onClose={() => setShowForm(false)} onSave={addDocItem} />}
+        {showForm && <AddCvForm onClose={() => setShowForm(false)} onSave={addDocItem} />}
       </AnimatePresence>
     </div>
   )
 }
 
-function DocRow({ d, onDelete, icon }) {
-  return (
-    <div className="doc-pill" style={{ marginBottom: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-        <span style={{ color: 'var(--sky-600)' }}>{icon}</span>
-        <div style={{ minWidth: 0 }}>
-          <b style={{ fontSize: 14, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.title}</b>
-          <span className="muted" style={{ fontSize: 12 }}>{d.sector ? d.sector + ' · ' : ''}{d.fileName ? '📎 ' + d.fileName : 'texto'}</span>
-        </div>
-      </div>
-      <button onClick={onDelete} style={{ background: 'none', color: '#dc2626' }}><Trash2 size={17} /></button>
-    </div>
-  )
-}
-
-function CvTemplateCard({ profile, onSave, onDelete }) {
+// ---- Carpeta de un sector: CV + plantilla de carta ----
+function CvFolder({ d, onDelete }) {
+  const { saveCoverTemplate, deleteCoverTemplate } = useApp()
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
-  async function pick(e) {
+  async function pickCover(e) {
     const f = e.target.files?.[0]
     if (!f) return
     if (!f.name.toLowerCase().endsWith('.docx')) { setMsg('Debe ser un archivo .docx (Word).'); return }
-    setBusy(true); setMsg('Guardando plantilla…')
+    setBusy(true); setMsg('Guardando…')
     try {
-      const base64 = await new Promise((res, rej) => {
-        const r = new FileReader()
-        r.onload = () => res(String(r.result).split(',')[1])
-        r.onerror = rej
-        r.readAsDataURL(f)
-      })
-      if (base64.length > 950000) { setMsg('El archivo es demasiado grande. Prueba con un .docx más ligero (menos imágenes).'); setBusy(false); return }
-      await onSave(base64, f.name)
+      const base64 = await fileToBase64(f)
+      if (base64.length > 950000) { setMsg('El .docx es demasiado grande. Prueba uno más ligero.'); setBusy(false); return }
+      await saveCoverTemplate(d.id, base64, f.name)
       setMsg('')
-    } catch { setMsg('No se pudo guardar la plantilla.') } finally { setBusy(false) }
+    } catch { setMsg('No se pudo guardar.') } finally { setBusy(false) }
   }
 
   return (
     <div className="card">
-      <h3 style={{ fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <FileType2 size={18} /> Plantilla de CV en Word
-      </h3>
-      <p className="muted" style={{ fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-        Sube tu CV en <b>.docx</b> con tu diseño. Donde quieras que la IA adapte el texto a cada oferta, escribe estas marcas
-        en tu Word: <code>{'{titulo}'}</code> (tu puesto) y <code>{'{perfil}'}</code> (tu resumen). La app respeta tu diseño y solo rellena esas marcas.
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <h3 style={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Folder size={18} style={{ color: 'var(--sky-600)' }} /> {d.sector || d.title || 'CV'}
+        </h3>
+        <button onClick={onDelete} style={{ background: 'none', color: '#dc2626' }} title="Eliminar carpeta"><Trash2 size={17} /></button>
+      </div>
 
-      {profile?.cvTemplateName ? (
-        <div className="doc-pill">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-            <span style={{ color: 'var(--sky-600)' }}><FileType2 size={18} /></span>
-            <b style={{ fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{profile.cvTemplateName}</b>
+      <div className="doc-pill" style={{ marginTop: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <FileText size={17} style={{ color: 'var(--sky-600)' }} />
+          <div style={{ minWidth: 0 }}>
+            <b style={{ fontSize: 13, display: 'block' }}>CV</b>
+            <span className="muted" style={{ fontSize: 12 }}>{d.fileName || 'texto pegado'}</span>
           </div>
-          <button onClick={onDelete} style={{ background: 'none', color: '#dc2626' }}><Trash2 size={17} /></button>
         </div>
-      ) : (
-        <label className="btn sm ghost block" style={{ cursor: 'pointer' }}>
-          {busy ? <span className="spinner dark" /> : <><Plus size={16} /> Subir plantilla .docx</>}
-          <input type="file" accept=".docx" onChange={pick} style={{ display: 'none' }} disabled={busy} />
-        </label>
-      )}
-      {msg && <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>{msg}</p>}
+        <span className="badge new">lo lee la IA</span>
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        {d.coverTemplateName ? (
+          <div className="doc-pill">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <FileType2 size={17} style={{ color: 'var(--sky-600)' }} />
+              <div style={{ minWidth: 0 }}>
+                <b style={{ fontSize: 13, display: 'block' }}>Plantilla de carta</b>
+                <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', maxWidth: 180 }}>{d.coverTemplateName}</span>
+              </div>
+            </div>
+            <button onClick={() => deleteCoverTemplate(d.id)} style={{ background: 'none', color: '#dc2626' }}><Trash2 size={16} /></button>
+          </div>
+        ) : (
+          <label className="btn sm ghost block" style={{ cursor: 'pointer' }}>
+            {busy ? <span className="spinner dark" /> : <><Plus size={15} /> Añadir plantilla de carta (.docx)</>}
+            <input type="file" accept=".docx" onChange={pickCover} style={{ display: 'none' }} disabled={busy} />
+          </label>
+        )}
+        {msg && <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{msg}</p>}
+        {!d.coverTemplateName && (
+          <p className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.5 }}>
+            En tu carta .docx, escribe la marca <code>{'{cuerpo}'}</code> donde va el texto. La app respeta tu diseño y la IA rellena ese hueco adaptado a cada oferta.
+          </p>
+        )}
+      </div>
     </div>
   )
 }
 
-function DocForm({ onClose, onSave }) {
-  const [type, setType] = useState('cv')
-  const [title, setTitle] = useState('')
+function AddCvForm({ onClose, onSave }) {
   const [sector, setSector] = useState('')
   const [text, setText] = useState('')
-  const [file, setFile] = useState(null)
   const [fileName, setFileName] = useState('')
-  const [msg, setMsg] = useState('Si subes tu CV en PDF, la app lee su texto para que la IA lo adapte a cada oferta.')
+  const [msg, setMsg] = useState('Sube tu CV en PDF: la app lee su texto para que la IA busque ofertas que encajen.')
   const [busy, setBusy] = useState(false)
 
   async function onPick(e) {
     const f = e.target.files?.[0]
     if (!f) return
-    setFile(f); setFileName(f.name)
-    if (!title) setTitle(f.name.replace(/\.pdf$/i, ''))
+    setFileName(f.name)
     setMsg('Leyendo PDF…')
     try {
       const extracted = await extractPdfText(f)
       setText(extracted)
-      setMsg(`📎 ${f.name} — texto extraído (${extracted.length} caracteres). Revísalo abajo.`)
+      setMsg(`📎 ${f.name} — texto leído (${extracted.length} caracteres).`)
     } catch {
-      setMsg(`📎 ${f.name} adjunto. No pude leer el texto automáticamente; pégalo abajo para que la IA lo adapte.`)
+      setMsg(`📎 ${f.name} adjunto. No pude leer el texto; pégalo abajo.`)
     }
   }
 
   async function save() {
-    if (!title.trim() || !text.trim()) { setMsg('Pon un título y contenido (sube el PDF o pega el texto).'); return }
+    if (!sector.trim() || !text.trim()) { setMsg('Pon el sector y sube el PDF (o pega el texto).'); return }
     setBusy(true)
-    await onSave({ type, title: title.trim(), sector: sector.trim(), text: text.trim(), fileName }, file)
+    await onSave({ type: 'cv', title: sector.trim(), sector: sector.trim(), text: text.trim(), fileName })
     setBusy(false); onClose()
   }
 
@@ -190,40 +187,27 @@ function DocForm({ onClose, onSave }) {
       <motion.div className="modal" onClick={(e) => e.stopPropagation()}
         initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 26, stiffness: 260 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <h3 style={{ fontWeight: 800, fontSize: 18 }}>Añadir documento</h3>
+          <h3 style={{ fontWeight: 800, fontSize: 18 }}>Añadir CV</h3>
           <button onClick={onClose} style={{ background: 'none' }}><X size={22} /></button>
         </div>
 
-        <div className="tabs">
-          <span className={`chip ${type === 'cv' ? 'active' : ''}`} onClick={() => setType('cv')}>CV</span>
-          <span className={`chip ${type === 'carta' ? 'active' : ''}`} onClick={() => setType('carta')}>Carta de motivación</span>
-        </div>
-
         <div className="field">
-          <label>Subir PDF (opcional)</label>
+          <label><Briefcase size={13} style={{ verticalAlign: -2 }} /> Sector (nombre de la carpeta)</label>
+          <input className="input" value={sector} onChange={(e) => setSector(e.target.value)} placeholder="p. ej. Hostelería, Logística, Construcción..." />
+        </div>
+        <div className="field">
+          <label>CV en PDF</label>
           <input className="input" type="file" accept=".pdf" onChange={onPick} />
           <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{msg}</p>
         </div>
         <div className="field">
-          <label>Título</label>
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)}
-            placeholder={type === 'cv' ? 'p. ej. CV Hostelería' : 'p. ej. Carta general'} />
-        </div>
-        {type === 'cv' && (
-          <div className="field">
-            <label>Sector (la IA lo usa para buscar ofertas)</label>
-            <input className="input" value={sector} onChange={(e) => setSector(e.target.value)}
-              placeholder="p. ej. Hostelería, Logística, IT..." />
-          </div>
-        )}
-        <div className="field">
-          <label>Contenido (se rellena solo al subir el PDF, o pégalo aquí)</label>
+          <label>Texto del CV (se rellena al subir el PDF, o pégalo)</label>
           <textarea className="textarea" value={text} onChange={(e) => setText(e.target.value)}
-            placeholder="Texto del CV/carta. La IA lo usa para adaptarlo a cada oferta." />
+            placeholder="La IA usa este texto para buscarte ofertas que encajen con tu perfil." />
         </div>
 
         <button className="btn block" onClick={save} disabled={busy}>
-          {busy ? <span className="spinner" /> : 'Guardar documento'}
+          {busy ? <span className="spinner" /> : 'Crear carpeta'}
         </button>
       </motion.div>
     </motion.div>

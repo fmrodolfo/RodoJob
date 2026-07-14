@@ -185,23 +185,23 @@ export function AppProvider({ children }) {
     await deleteDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'contacts', id))
   }, [user, activeId])
 
-  // --- Plantilla de CV en Word (.docx) ---
-  const saveCvTemplate = useCallback(async (base64, name) => {
+  // --- Plantilla de CARTA en Word (.docx) por cada CV/carpeta ---
+  const saveCoverTemplate = useCallback(async (docId, base64, name) => {
     if (!user || !activeId) return
-    await setDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'assets', 'cvTemplate'), { data: base64, name })
-    await updateDoc(doc(db, 'users', user.uid, 'profiles', activeId), { cvTemplateName: name })
+    await setDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId, 'assets', 'coverTemplate'), { data: base64, name })
+    await updateDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId), { coverTemplateName: name })
   }, [user, activeId])
 
-  const getCvTemplate = useCallback(async () => {
+  const getCoverTemplate = useCallback(async (docId) => {
     if (!user || !activeId) return null
-    const snap = await getDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'assets', 'cvTemplate'))
+    const snap = await getDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId, 'assets', 'coverTemplate'))
     return snap.exists() ? snap.data().data : null
   }, [user, activeId])
 
-  const deleteCvTemplate = useCallback(async () => {
+  const deleteCoverTemplate = useCallback(async (docId) => {
     if (!user || !activeId) return
-    await deleteDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'assets', 'cvTemplate'))
-    await updateDoc(doc(db, 'users', user.uid, 'profiles', activeId), { cvTemplateName: '' })
+    await deleteDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId, 'assets', 'coverTemplate'))
+    await updateDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId), { coverTemplateName: '' })
   }, [user, activeId])
 
   const value = {
@@ -212,7 +212,7 @@ export function AppProvider({ children }) {
     applied, markApplied, unmarkApplied, isApplied,
     dismissed, markDismissed, isDismissed,
     contacts, addContact, toggleContactSent, deleteContact,
-    saveCvTemplate, getCvTemplate, deleteCvTemplate,
+    saveCoverTemplate, getCoverTemplate, deleteCoverTemplate,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

@@ -105,7 +105,7 @@ export default function DirectoryPage() {
               <div className="job-actions">
                 <a className="btn sm" href={c.website} target="_blank" rel="noreferrer">Ver web y aplicar <ExternalLink size={15} /></a>
                 {c.email && <a className="btn sm ghost" href={`mailto:${c.email}`}>Correo <Mail size={14} /></a>}
-                <button className="btn sm ghost" onClick={() => setAdaptFor(c)}><Sparkles size={15} /> Adaptar CV / carta</button>
+                <button className="btn sm ghost" onClick={() => setAdaptFor(c)}><Sparkles size={15} /> Carta con IA</button>
                 <button className="btn sm ghost" onClick={() => toggleContacted(c)}>
                   <Check size={15} /> {done ? 'Contactada ✓' : 'Marcar contactada'}
                 </button>

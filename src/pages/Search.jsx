@@ -169,7 +169,7 @@ export default function SearchPage() {
             {job.description && <p className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{job.description.slice(0, 160)}…</p>}
             <div className="job-actions">
               <a className="btn sm" href={job.redirect_url} target="_blank" rel="noreferrer">Ver y aplicar <ExternalLink size={15} /></a>
-              <button className="btn sm ghost" onClick={() => setCandidacyJob(job)}><Sparkles size={15} /> Preparar con IA</button>
+              <button className="btn sm ghost" onClick={() => setCandidacyJob(job)}><Sparkles size={15} /> Carta con IA</button>
               <button className="btn sm ghost" onClick={() => markApplied(job)}><Check size={15} /> Ya apliqué</button>
               <button className="btn sm ghost" onClick={() => markDismissed(job)} title="No me interesa"><X size={15} /> Descartar</button>
             </div>

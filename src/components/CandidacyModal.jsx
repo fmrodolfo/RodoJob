@@ -1,46 +1,48 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useApp } from '../context/AppContext'
-import { askAI, aiCvFields } from '../lib/api'
-import { cvToPdf, letterToPdf } from '../lib/pdf'
+import { askAI } from '../lib/api'
+import { letterToPdf } from '../lib/pdf'
 import { fillDocxTemplate } from '../lib/docx'
-import { X, Sparkles, FileDown, ExternalLink, Check, FileText, Mail, Copy, FileType2 } from 'lucide-react'
+import { X, Sparkles, FileDown, ExternalLink, Check, Mail, Copy, FileType2 } from 'lucide-react'
 
-// Genera CV y carta adaptados a UNA oferta concreta (solo si el usuario lo pide).
+// Genera la CARTA DE MOTIVACIÓN adaptada a una oferta o empresa.
 export default function CandidacyModal({ job, onClose, onApplied, companyMode = false }) {
-  const { activeProfile, docs, getCvTemplate } = useApp()
-  const [cv, setCv] = useState('')
+  const { activeProfile, docs, getCoverTemplate } = useApp()
   const [letter, setLetter] = useState('')
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
+  const [copied, setCopied] = useState(false)
   const [language, setLanguage] = useState('auto')
 
-  const hasCV = docs.some((d) => d.type === 'cv')
+  const cvs = docs.filter((d) => d.type === 'cv')
+  const hasCV = cvs.length > 0
+  const templates = cvs.filter((d) => d.coverTemplateName)
+  const [designId, setDesignId] = useState(templates[0]?.id || '')
   const profilePayload = { name: activeProfile?.name, docs }
 
-  async function gen(kind) {
-    setErr(''); setBusy(kind)
+  async function generate() {
+    setErr(''); setBusy('gen')
     try {
-      const text = await askAI({ task: { kind, job, language }, profile: profilePayload })
-      if (kind === 'adaptCV') setCv(text)
-      else setLetter(text)
+      const text = await askAI({ task: { kind: 'coverLetter', job, language }, profile: profilePayload })
+      setLetter(text)
     } catch (e) {
       setErr(e.message || 'Error al generar. Revisa la GROQ_API_KEY en Netlify.')
     } finally { setBusy('') }
   }
 
-  async function genWord() {
+  function copy() { navigator.clipboard.writeText(letter); setCopied(true); setTimeout(() => setCopied(false), 1500) }
+  function pdf() { letterToPdf({ subtitle: `${job.title} · ${job.company}`, body: letter, filename: `Carta_${slug(job.company)}.pdf` }) }
+  async function word() {
     setErr(''); setBusy('word')
     try {
-      const base64 = await getCvTemplate()
-      if (!base64) { setErr('No tienes plantilla Word guardada. Súbela en tu perfil.'); return }
-      const fields = await aiCvFields({ profile: profilePayload, job, language })
-      fillDocxTemplate(base64, {
-        titulo: fields.titulo, perfil: fields.perfil,
-        puesto: job.title, empresa: job.company, lugar: job.location,
-      }, `CV_${slug(job.company)}.docx`)
+      const base64 = await getCoverTemplate(designId)
+      if (!base64) { setErr('No encuentro la plantilla de carta. Revísala en tu perfil.'); return }
+      const fecha = new Date().toLocaleDateString('es-ES')
+      fillDocxTemplate(base64, { cuerpo: letter, empresa: job.company, puesto: job.title, lugar: job.location, fecha },
+        `Carta_${slug(job.company)}.docx`)
     } catch (e) {
-      setErr(e.message || 'No se pudo generar el CV en Word. Revisa que las marcas {titulo} y {perfil} estén bien escritas en tu plantilla.')
+      setErr(e.message || 'No se pudo generar la carta en Word. Revisa que la marca {cuerpo} esté en tu plantilla.')
     } finally { setBusy('') }
   }
 
@@ -51,24 +53,24 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
           <div>
             <h3 style={{ fontWeight: 800, fontSize: 18 }}>{job.title}</h3>
-            <p className="muted" style={{ fontSize: 13 }}>{job.company} · {job.location}</p>
+            <p className="muted" style={{ fontSize: 13 }}>{job.company}{job.location ? ` · ${job.location}` : ''}</p>
           </div>
           <button onClick={onClose} style={{ background: 'none' }}><X size={22} /></button>
         </div>
 
-        <p className="muted" style={{ fontSize: 13, margin: '10px 0 16px' }}>
-          La IA adaptará tu CV y tu carta a esta oferta usando tus documentos. Revisa siempre el resultado antes de enviarlo.
+        <p className="muted" style={{ fontSize: 13, margin: '10px 0 14px' }}>
+          La IA escribe tu carta de motivación adaptada a esta {companyMode ? 'empresa' : 'oferta'}, usando tus CVs. Revísala antes de enviarla.
         </p>
 
         {!hasCV && (
           <div className="card" style={{ background: '#fef3c7', border: '1px solid #fde68a', marginBottom: 14 }}>
-            Añade al menos un CV en tu perfil para que la IA pueda adaptarlo.
+            Añade al menos un CV en tu perfil para que la IA conozca tu experiencia.
           </div>
         )}
         {err && <div className="card" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c', marginBottom: 14 }}>{err}</div>}
 
         <div className="field">
-          <label>¿En qué idioma quieres el CV y la carta?</label>
+          <label>Idioma de la carta</label>
           <select className="select" value={language} onChange={(e) => setLanguage(e.target.value)}>
             <option value="auto">Automático (según la oferta)</option>
             <option value="español">Español</option>
@@ -80,59 +82,42 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
           </select>
         </div>
 
-        {activeProfile?.cvTemplateName && (
-          <button className="btn block" style={{ marginBottom: 12 }} onClick={genWord} disabled={busy}>
-            {busy === 'word' ? <span className="spinner" /> : <><FileType2 size={16} /> Descargar mi CV en Word (con mi diseño)</>}
-          </button>
-        )}
+        <button className="btn block" onClick={generate} disabled={!hasCV || busy} style={{ marginBottom: 14 }}>
+          {busy === 'gen' ? <span className="spinner" /> : <><Sparkles size={16} /> {letter ? 'Volver a generar carta' : 'Generar carta con IA'}</>}
+        </button>
 
-        <div className="row" style={{ marginBottom: 16 }}>
-          <button className="btn sm" onClick={() => gen('adaptCV')} disabled={!hasCV || busy}>
-            {busy === 'adaptCV' ? <span className="spinner" /> : <><Sparkles size={15} /> Adaptar CV (texto/PDF)</>}
-          </button>
-          <button className="btn sm" onClick={() => gen('coverLetter')} disabled={!hasCV || busy}>
-            {busy === 'coverLetter' ? <span className="spinner" /> : <><Sparkles size={15} /> Generar carta</>}
-          </button>
-        </div>
-
-        {cv && (
-          <Result icon={<FileText size={16} />} title="CV adaptado" text={cv} onChange={setCv}
-            onPdf={() => cvToPdf({ name: activeProfile?.name, jobTitle: job.title, contact: '', body: cv, photoDataUrl: activeProfile?.photoURL, filename: `CV_${slug(job.company)}.pdf` })} />
-        )}
         {letter && (
-          <Result icon={<Mail size={16} />} title="Carta de motivación" text={letter} onChange={setLetter}
-            onPdf={() => letterToPdf({ subtitle: `${job.title} · ${job.company}`, body: letter, filename: `Carta_${slug(job.company)}.pdf` })} />
+          <>
+            <textarea className="textarea" value={letter} onChange={(e) => setLetter(e.target.value)} style={{ minHeight: 220 }} />
+            <p className="muted" style={{ fontSize: 12, margin: '6px 0 12px' }}>Puedes editar la carta antes de descargarla. Elige el formato:</p>
+
+            {templates.length > 0 && (
+              <div className="field">
+                <label>Diseño de carta (tu plantilla .docx)</label>
+                <select className="select" value={designId} onChange={(e) => setDesignId(e.target.value)}>
+                  {templates.map((t) => <option key={t.id} value={t.id}>{t.sector || t.title} — {t.coverTemplateName}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn sm ghost" onClick={copy}>{copied ? <><Check size={15} /> Copiado</> : <><Copy size={15} /> Copiar texto</>}</button>
+              <button className="btn sm ghost" onClick={pdf}><FileDown size={15} /> PDF</button>
+              {templates.length > 0 && (
+                <button className="btn sm" onClick={word} disabled={busy}>
+                  {busy === 'word' ? <span className="spinner" /> : <><FileType2 size={15} /> Word (mi diseño)</>}
+                </button>
+              )}
+            </div>
+          </>
         )}
 
         <div className="row" style={{ marginTop: 18 }}>
-          <a className="btn" href={job.redirect_url} target="_blank" rel="noreferrer">
-            Ir a la oferta <ExternalLink size={16} />
-          </a>
+          <a className="btn" href={job.redirect_url} target="_blank" rel="noreferrer">Ir a la {companyMode ? 'web' : 'oferta'} <ExternalLink size={16} /></a>
           <button className="btn ghost" onClick={onApplied}><Check size={16} /> {companyMode ? 'Marcar contactada' : 'Marcar aplicada'}</button>
         </div>
       </motion.div>
     </motion.div>
-  )
-}
-
-function Result({ icon, title, text, onChange, onPdf }) {
-  const [copied, setCopied] = useState(false)
-  function copy() {
-    navigator.clipboard.writeText(text)
-    setCopied(true); setTimeout(() => setCopied(false), 1500)
-  }
-  return (
-    <div className="card" style={{ marginBottom: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
-        <b style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{icon} {title}</b>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button className="btn sm ghost" onClick={copy}>{copied ? <><Check size={15} /> Copiado</> : <><Copy size={15} /> Copiar texto</>}</button>
-          <button className="btn sm" onClick={onPdf}><FileDown size={15} /> PDF</button>
-        </div>
-      </div>
-      <textarea className="textarea" value={text} onChange={(e) => onChange(e.target.value)} style={{ minHeight: 200 }} />
-      <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>Puedes editar el texto antes de copiarlo o descargarlo.</p>
-    </div>
   )
 }
 
