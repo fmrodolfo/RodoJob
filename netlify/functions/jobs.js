@@ -21,7 +21,7 @@ export async function handler(event) {
   const url = new URL(`https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`)
   url.searchParams.set('app_id', appId)
   url.searchParams.set('app_key', appKey)
-  url.searchParams.set('results_per_page', '25')
+  url.searchParams.set('results_per_page', '50')
   url.searchParams.set('content-type', 'application/json')
   if (what) url.searchParams.set('what', what)
   if (where) url.searchParams.set('where', where)

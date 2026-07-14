@@ -30,16 +30,22 @@ export default function SearchPage() {
   const toggleCv = (id) => setDeselected((d) => d.includes(id) ? d.filter((x) => x !== id) : [...d, id])
   const selectedCvs = cvs.filter((c) => isSel(c.id))
 
-  async function fetchJobs(terms, cityList, category) {
+  // Trae ofertas para una lista de consultas {what, category}, con varias páginas
+  async function fetchBatch(queries, cityList, pages) {
     const out = []
     for (const city of cityList) {
-      for (const t of terms) {
-        const data = await searchJobs({ what: t, where: city, country, maxDaysOld: maxDays, category })
-        out.push(...(data.results || []))
+      for (const q of queries) {
+        for (let pg = 1; pg <= pages; pg++) {
+          const data = await searchJobs({ what: q.what, where: city, country, maxDaysOld: maxDays, category: q.category, page: pg })
+          const rs = data.results || []
+          out.push(...rs)
+          if (rs.length < 50) break // no hay más páginas
+        }
       }
     }
     return out
   }
+  const uniqQ = (arr) => { const s = new Set(); return arr.filter((q) => { const k = q.what + '|' + q.category; if (s.has(k)) return false; s.add(k); return true }) }
 
   async function run() {
     setLoading(true); setErr(''); setNote(''); setSearched(true)
@@ -48,36 +54,45 @@ export default function SearchPage() {
       const cityList = cities.length ? cities : ['']
       setStatusMsg(refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tus CVs…')
 
-      // Una búsqueda por cada CV seleccionado (cada sector con sus términos y categoría)
-      const searches = []
+      // Consultas por cada CV: "primary" = todas las ofertas del sector (categoría), "secondary" = por término
+      const primary = [], secondary = []
       if (refine.trim()) {
-        searches.push({ terms: [refine.trim()], category: '' })
+        secondary.push({ what: refine.trim(), category: '' })
       } else {
         for (const cv of selectedCvs) {
-          try {
-            const r = await aiJobSearch({ profile: { name: activeProfile?.name, docs: [cv] }, country: countryName, city: cities[0] })
-            searches.push(r.terms.length ? r : { terms: rolesFromDocs([cv]), category: '' })
-          } catch {
-            searches.push({ terms: rolesFromDocs([cv]), category: '' })
-          }
+          let r
+          try { r = await aiJobSearch({ profile: { name: activeProfile?.name, docs: [cv] }, country: countryName, city: cities[0] }) }
+          catch { r = { terms: rolesFromDocs([cv]), category: '' } }
+          if (r.category) primary.push({ what: '', category: r.category })
+          const terms = (r.terms && r.terms.length) ? r.terms : rolesFromDocs([cv])
+          terms.slice(0, 2).forEach((t) => secondary.push({ what: t, category: r.category || '' }))
         }
       }
-      setTermsUsed([...new Set(searches.flatMap((s) => s.terms))])
+      const primaryU = uniqQ(primary), secondaryU = uniqQ(secondary)
+      setTermsUsed([...new Set(secondary.map((q) => q.what).filter(Boolean))])
       setStatusMsg('Buscando ofertas…')
 
       const seen = new Set(); const all = []
-      const gather = async (cityL, useCat) => {
-        for (const s of searches) {
-          const res = await fetchJobs(s.terms, cityL, useCat ? s.category : '')
-          for (const j of res) { const k = j.redirect_url || j.id; if (!seen.has(k)) { seen.add(k); all.push(j) } }
-        }
-      }
-      await gather(cityList, true)
+      const add = (rs) => { for (const j of rs) { const k = j.redirect_url || j.id; if (!seen.has(k)) { seen.add(k); all.push(j) } } }
+
+      // 1) todas las ofertas del sector (mucho volumen) + términos concretos
+      add(await fetchBatch(primaryU, cityList, 2))
+      add(await fetchBatch(secondaryU, cityList, 1))
+      // 2) si no hay nada en la ciudad, todo el país
       if (all.length === 0 && cities.length) {
-        await gather([''], true)
+        add(await fetchBatch(primaryU, [''], 2))
+        add(await fetchBatch(secondaryU, [''], 1))
         if (all.length) setNote(`No encontré ofertas exactamente en ${cities.join(', ')}; te muestro las de todo el país (${countryName}).`)
       }
-      if (all.length === 0) { await gather(cityList, false); if (all.length === 0 && cities.length) await gather([''], false) }
+      // 3) último recurso: sin categoría
+      if (all.length === 0) {
+        const noCat = uniqQ(secondaryU.map((q) => ({ what: q.what, category: '' })))
+        add(await fetchBatch(noCat, cityList, 1))
+        if (all.length === 0 && cities.length) add(await fetchBatch(noCat, [''], 1))
+      }
+
+      // ordenar por fecha (más recientes primero)
+      all.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0))
       setResults(all)
     } catch (e) {
       setErr(e.message || 'No se pudieron cargar las ofertas.'); setResults([])

@@ -83,10 +83,11 @@ export function rolesFromDocs(docs) {
   return [...new Set(roles)]
 }
 
-export async function searchJobs({ what, where, country, maxDaysOld, category }) {
+export async function searchJobs({ what, where, country, maxDaysOld, category, page }) {
   const params = new URLSearchParams({ what, where, country })
   if (maxDaysOld && maxDaysOld !== 'any') params.set('max_days_old', String(maxDaysOld))
   if (category) params.set('category', category)
+  if (page) params.set('page', String(page))
   const res = await fetch(`/api/jobs?${params.toString()}`)
   if (!res.ok) throw new Error((await res.text().catch(() => '')) || `Error ${res.status} al buscar ofertas`)
   return res.json()
