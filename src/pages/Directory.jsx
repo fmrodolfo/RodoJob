@@ -27,8 +27,8 @@ export default function DirectoryPage() {
       if (!cities.length) { setErr('Elige al menos una ciudad de la lista.'); setLoading(false); return }
       const all = []
       const seen = new Set()
-      for (const city of cities) {
-        const data = await searchCompanies({ where: city, sector })
+      for (const c of cities) {
+        const data = await searchCompanies({ where: c.name, sector })
         for (const c of (data.results || [])) {
           const k = compKey(c)
           if (seen.has(k)) continue

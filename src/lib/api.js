@@ -100,6 +100,14 @@ export async function searchCompanies({ where, sector }) {
   return res.json()
 }
 
+// Distancia en km entre dos coordenadas (Haversine)
+export function kmBetween(lat1, lon1, lat2, lon2) {
+  const R = 6371, toR = (d) => (d * Math.PI) / 180
+  const dLat = toR(lat2 - lat1), dLon = toR(lon2 - lon1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toR(lat1)) * Math.cos(toR(lat2)) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(a))
+}
+
 export async function geocodeCity(q, country) {
   const params = new URLSearchParams({ q })
   if (country) params.set('country', country)

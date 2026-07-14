@@ -23,7 +23,7 @@ export async function handler(event) {
       const key = name.toLowerCase() + '|' + (a.country || '')
       if (seen.has(key)) continue
       seen.add(key)
-      out.push({ name, label: it.display_name })
+      out.push({ name, label: it.display_name, lat: parseFloat(it.lat), lon: parseFloat(it.lon) })
       if (out.length >= 6) break
     }
     return json(200, out)

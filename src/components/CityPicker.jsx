@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { MapPin, X } from 'lucide-react'
 import { geocodeCity } from '../lib/api'
 
-// Selector de ciudades con autocompletado (sugerencias reales) y chips seleccionados.
+// Selector de ciudades con autocompletado. Guarda objetos { name, lat, lon }.
 export default function CityPicker({ cities, onChange, placeholder, country }) {
   const [q, setQ] = useState('')
   const [sug, setSug] = useState([])
@@ -23,27 +23,28 @@ export default function CityPicker({ cities, onChange, placeholder, country }) {
     return () => clearTimeout(timer.current)
   }, [q, country])
 
-  // cerrar el desplegable al hacer clic fuera
   useEffect(() => {
     const h = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
-  function add(name) {
-    if (name && !cities.includes(name)) onChange([...cities, name])
+  function add(item) {
+    if (item?.name && !cities.some((c) => c.name === item.name)) {
+      onChange([...cities, { name: item.name, lat: item.lat ?? null, lon: item.lon ?? null }])
+    }
     setQ(''); setSug([]); setOpen(false)
   }
-  function remove(name) { onChange(cities.filter((c) => c !== name)) }
+  function remove(nm) { onChange(cities.filter((c) => c.name !== nm)) }
 
   return (
     <div ref={box} style={{ position: 'relative' }}>
       {cities.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
           {cities.map((c) => (
-            <span key={c} className="chip active" style={{ cursor: 'default' }}>
-              <MapPin size={13} /> {c}
-              <X size={14} style={{ cursor: 'pointer', marginLeft: 2 }} onClick={() => remove(c)} />
+            <span key={c.name} className="chip active" style={{ cursor: 'default' }}>
+              <MapPin size={13} /> {c.name}
+              <X size={14} style={{ cursor: 'pointer', marginLeft: 2 }} onClick={() => remove(c.name)} />
             </span>
           ))}
         </div>
@@ -54,7 +55,7 @@ export default function CityPicker({ cities, onChange, placeholder, country }) {
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => { if (sug.length) setOpen(true) }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') { e.preventDefault(); if (sug[0]) add(sug[0].name); else if (q.trim()) add(q.trim()) }
+          if (e.key === 'Enter') { e.preventDefault(); if (sug[0]) add(sug[0]); else if (q.trim()) add({ name: q.trim() }) }
         }}
       />
 
@@ -66,7 +67,7 @@ export default function CityPicker({ cities, onChange, placeholder, country }) {
         }}>
           {loading && <div style={{ padding: '10px 14px', fontSize: 13 }} className="muted">Buscando ciudades…</div>}
           {!loading && sug.map((s, i) => (
-            <div key={i} onClick={() => add(s.name)}
+            <div key={i} onClick={() => add(s)}
               style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center', borderTop: i ? '1px solid var(--border)' : 'none' }}
               onMouseDown={(e) => e.preventDefault()}
               onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--sky-50)')}

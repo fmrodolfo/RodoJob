@@ -47,6 +47,8 @@ export async function handler(event) {
       created: j.created,
       redirect_url: j.redirect_url,
       category: j.category?.label || '',
+      latitude: j.latitude,
+      longitude: j.longitude,
     }))
     return json(200, { count: data.count || results.length, results })
   } catch (e) {

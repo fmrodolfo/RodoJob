@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
-import { searchJobs, portalLinks, rolesFromDocs, aiJobSearch, COUNTRIES, DATE_FILTERS } from '../lib/api'
+import { searchJobs, portalLinks, rolesFromDocs, aiJobSearch, geocodeCity, kmBetween, COUNTRIES, DATE_FILTERS } from '../lib/api'
 import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase, X, Folder } from 'lucide-react'
 import CandidacyModal from '../components/CandidacyModal'
 import CityPicker from '../components/CityPicker'
@@ -51,47 +51,47 @@ export default function SearchPage() {
     setLoading(true); setErr(''); setNote(''); setSearched(true)
     try {
       if (!selectedCvs.length) { setErr('Selecciona al menos un CV para buscar.'); setLoading(false); return }
-      const cityList = cities.length ? cities : ['']
       setStatusMsg(refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tus CVs…')
 
-      // Consultas por cada CV: "primary" = todas las ofertas del sector (categoría), "secondary" = por término
-      const primary = [], secondary = []
+      // Consultas por CV: categoría del sector = máximo volumen relevante
+      const queries = []; const display = []
       if (refine.trim()) {
-        secondary.push({ what: refine.trim(), category: '' })
+        queries.push({ what: refine.trim(), category: '' })
       } else {
         for (const cv of selectedCvs) {
           let r
-          try { r = await aiJobSearch({ profile: { name: activeProfile?.name, docs: [cv] }, country: countryName, city: cities[0] }) }
+          try { r = await aiJobSearch({ profile: { name: activeProfile?.name, docs: [cv] }, country: countryName, city: cities[0]?.name }) }
           catch { r = { terms: rolesFromDocs([cv]), category: '' } }
-          if (r.category) primary.push({ what: '', category: r.category })
-          const terms = (r.terms && r.terms.length) ? r.terms : rolesFromDocs([cv])
-          terms.slice(0, 2).forEach((t) => secondary.push({ what: t, category: r.category || '' }))
+          ;(r.terms || []).forEach((t) => display.push(t))
+          if (r.category) queries.push({ what: '', category: r.category })
+          else ((r.terms && r.terms.length) ? r.terms : rolesFromDocs([cv])).slice(0, 2).forEach((t) => queries.push({ what: t, category: '' }))
         }
       }
-      const primaryU = uniqQ(primary), secondaryU = uniqQ(secondary)
-      setTermsUsed([...new Set(secondary.map((q) => q.what).filter(Boolean))])
+      const queriesU = uniqQ(queries)
+      setTermsUsed([...new Set(display)])
       setStatusMsg('Buscando ofertas…')
 
-      const seen = new Set(); const all = []
-      const add = (rs) => { for (const j of rs) { const k = j.redirect_url || j.id; if (!seen.has(k)) { seen.add(k); all.push(j) } } }
-
-      // 1) todas las ofertas del sector (mucho volumen) + términos concretos
-      add(await fetchBatch(primaryU, cityList, 2))
-      add(await fetchBatch(secondaryU, cityList, 1))
-      // 2) si no hay nada en la ciudad, todo el país
-      if (all.length === 0 && cities.length) {
-        add(await fetchBatch(primaryU, [''], 2))
-        add(await fetchBatch(secondaryU, [''], 1))
-        if (all.length) setNote(`No encontré ofertas exactamente en ${cities.join(', ')}; te muestro las de todo el país (${countryName}).`)
-      }
-      // 3) último recurso: sin categoría
-      if (all.length === 0) {
-        const noCat = uniqQ(secondaryU.map((q) => ({ what: q.what, category: '' })))
-        add(await fetchBatch(noCat, cityList, 1))
-        if (all.length === 0 && cities.length) add(await fetchBatch(noCat, [''], 1))
+      // Coordenadas de las ciudades elegidas (para filtrar por distancia real)
+      const targets = []
+      for (const c of cities) {
+        if (c.lat != null && c.lon != null) targets.push(c)
+        else { try { const g = await geocodeCity(c.name, country); if (g[0]) targets.push(g[0]) } catch { /* nada */ } }
       }
 
-      // ordenar por fecha (más recientes primero)
+      // Traer ofertas de todo el país (mucho volumen) y filtrar por cercanía a la ciudad
+      const seen = new Set(); const raw = []
+      const add = (rs) => { for (const j of rs) { const k = j.redirect_url || j.id; if (!seen.has(k)) { seen.add(k); raw.push(j) } } }
+      add(await fetchBatch(queriesU, [''], 3))
+
+      const R = 35 // km a la redonda
+      let all = raw
+      if (targets.length) {
+        const near = raw.filter((j) => j.latitude != null && j.longitude != null &&
+          targets.some((t) => kmBetween(t.lat, t.lon, j.latitude, j.longitude) <= R))
+        if (near.length) all = near
+        else { all = raw; setNote(`No pude localizar ofertas justo en ${cities.map((c) => c.name).join(', ')}; te muestro las de todo el país (${countryName}).`) }
+      }
+
       all.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0))
       setResults(all)
     } catch (e) {
@@ -100,7 +100,7 @@ export default function SearchPage() {
   }
 
   const visible = results.filter((j) => !isApplied(j) && !isDismissed(j))
-  const links = portalLinks(country, termsUsed[0] || '', cities[0] || '')
+  const links = portalLinks(country, termsUsed[0] || '', cities[0]?.name || '')
 
   return (
     <div>
