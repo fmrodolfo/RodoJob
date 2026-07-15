@@ -142,7 +142,7 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
         )}
 
         <div className="row" style={{ marginTop: 18 }}>
-          <a className="btn" href={job.redirect_url} target="_blank" rel="noreferrer">Ir a la {companyMode ? 'web' : 'oferta'} <ExternalLink size={16} /></a>
+          {job.redirect_url && <a className="btn" href={job.redirect_url} target="_blank" rel="noreferrer">Ir a la {companyMode ? 'web' : 'oferta'} <ExternalLink size={16} /></a>}
           <button className="btn ghost" onClick={onApplied}><Check size={16} /> {companyMode ? 'Marcar contactada' : 'Marcar aplicada'}</button>
         </div>
       </motion.div>

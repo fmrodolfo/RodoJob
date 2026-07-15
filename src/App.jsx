@@ -10,6 +10,7 @@ import SearchPage from './pages/Search'
 import AppliedPage from './pages/Applied'
 import DirectoryPage from './pages/Directory'
 import ProfilePage from './pages/Profile'
+import CoverLetterPage from './pages/CoverLetter'
 
 const fade = {
   initial: { opacity: 0, y: 12 },
@@ -54,6 +55,7 @@ export default function App() {
           <Layout onSwitchProfile={() => setEntered(false)}>
             <Routes>
               <Route path="/" element={<SearchPage />} />
+              <Route path="/cartas" element={<CoverLetterPage />} />
               <Route path="/aplicadas" element={<AppliedPage />} />
               <Route path="/empresas" element={<DirectoryPage />} />
               <Route path="/perfil" element={<ProfilePage />} />

@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Search, CheckCircle, Building2, User } from 'lucide-react'
+import { Search, CheckCircle, Building2, User, Mail } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 
 export default function Layout({ children, onSwitchProfile }) {
@@ -25,10 +25,11 @@ export default function Layout({ children, onSwitchProfile }) {
       <div className="page">{children}</div>
 
       <nav className="nav">
-        <NavLink to="/" end><Search size={22} /><span>Ofertas</span></NavLink>
-        <NavLink to="/aplicadas"><CheckCircle size={22} /><span>Aplicadas</span></NavLink>
-        <NavLink to="/empresas"><Building2 size={22} /><span>Empresas</span></NavLink>
-        <NavLink to="/perfil"><User size={22} /><span>Perfil</span></NavLink>
+        <NavLink to="/" end><Search size={21} /><span>Ofertas</span></NavLink>
+        <NavLink to="/cartas"><Mail size={21} /><span>Cartas</span></NavLink>
+        <NavLink to="/aplicadas"><CheckCircle size={21} /><span>Aplicadas</span></NavLink>
+        <NavLink to="/empresas"><Building2 size={21} /><span>Empresas</span></NavLink>
+        <NavLink to="/perfil"><User size={21} /><span>Perfil</span></NavLink>
       </nav>
     </div>
   )
