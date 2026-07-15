@@ -1,10 +1,22 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useApp } from '../context/AppContext'
 import { askAI } from '../lib/api'
 import { letterToPdf } from '../lib/pdf'
 import { fillDocxTemplate } from '../lib/docx'
-import { X, Sparkles, FileDown, ExternalLink, Check, Mail, Copy, FileType2 } from 'lucide-react'
+import { X, Sparkles, FileDown, ExternalLink, Check, Mail, Copy, FileType2, FileText } from 'lucide-react'
+
+// Elige automáticamente el CV que mejor encaja con la oferta
+function bestCvId(job, cvs) {
+  const words = (job.title || '').toLowerCase().split(/\W+/).filter((w) => w.length > 3)
+  let best = cvs[0]?.id || '', bestScore = -1
+  for (const c of cvs) {
+    const hay = ((c.sector || '') + ' ' + (c.title || '') + ' ' + (c.text || '').slice(0, 1500)).toLowerCase()
+    const score = words.reduce((s, w) => s + (hay.includes(w) ? 1 : 0), 0)
+    if (score > bestScore) { bestScore = score; best = c.id }
+  }
+  return best
+}
 
 // Genera la CARTA DE MOTIVACIÓN adaptada a una oferta o empresa.
 export default function CandidacyModal({ job, onClose, onApplied, companyMode = false }) {
@@ -18,12 +30,19 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
   const cvs = docs.filter((d) => d.type === 'cv')
   const hasCV = cvs.length > 0
   const templates = cvs.filter((d) => d.coverTemplateName)
+  const [refCvId, setRefCvId] = useState(() => bestCvId(job, cvs))
   const [designId, setDesignId] = useState(templates[0]?.id || '')
-  const profilePayload = { name: activeProfile?.name, docs }
+  const refCv = cvs.find((c) => c.id === refCvId) || cvs[0] || null
+
+  // Si el CV de referencia tiene su propia plantilla de carta, usarla por defecto
+  useEffect(() => {
+    if (refCv?.coverTemplateName) setDesignId(refCv.id)
+  }, [refCvId])
 
   async function generate() {
     setErr(''); setBusy('gen')
     try {
+      const profilePayload = { name: activeProfile?.name, docs: refCv ? [refCv] : docs }
       const text = await askAI({ task: { kind: 'coverLetter', job, language }, profile: profilePayload })
       setLetter(text)
     } catch (e) {
@@ -68,6 +87,16 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
           </div>
         )}
         {err && <div className="card" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c', marginBottom: 14 }}>{err}</div>}
+
+        {hasCV && (
+          <div className="field">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}><FileText size={14} /> CV de referencia (la IA se basa en este)</label>
+            <select className="select" value={refCvId} onChange={(e) => setRefCvId(e.target.value)}>
+              {cvs.map((c) => <option key={c.id} value={c.id}>{c.sector || c.title}</option>)}
+            </select>
+            <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>Comprueba que sea el CV adecuado para esta oferta antes de generar.</p>
+          </div>
+        )}
 
         <div className="field">
           <label>Idioma de la carta</label>

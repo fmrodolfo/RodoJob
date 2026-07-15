@@ -46,6 +46,8 @@ export default async function handler(req, res) {
     { role: 'system', content: SYSTEM },
     { role: 'user', content: buildUserPrompt(task, profile) },
   ]
+  // Para elegir los puestos de búsqueda queremos resultados estables (poca aleatoriedad)
+  const temperature = task.kind === 'jobTerms' ? 0.2 : 0.7
 
   let lastErr = ''
   for (const model of MODELS) {
@@ -53,7 +55,7 @@ export default async function handler(req, res) {
       const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1400 }),
+        body: JSON.stringify({ model, messages, temperature, max_tokens: 1400 }),
       })
       if (r.ok) {
         const data = await r.json()

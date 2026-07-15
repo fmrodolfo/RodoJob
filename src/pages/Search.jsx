@@ -77,10 +77,11 @@ export default function SearchPage() {
         else { try { const g = await geocodeCity(c.name, country); if (g[0]) targets.push(g[0]) } catch { /* nada */ } }
       }
 
-      // Traer ofertas de todo el país (mucho volumen) y filtrar por cercanía a la ciudad
+      // Buscamos en la ciudad Y en todo el país (más volumen), con varias páginas
       const seen = new Set(); const raw = []
       const add = (rs) => { for (const j of rs) { const k = j.redirect_url || j.id; if (!seen.has(k)) { seen.add(k); raw.push(j) } } }
-      add(await fetchBatch(queriesU, [''], 3))
+      const whereList = cities.length ? [...cities.map((c) => c.name), ''] : ['']
+      add(await fetchBatch(queriesU, whereList, 4))
 
       const R = 35 // km a la redonda
       let all = raw
@@ -185,6 +186,10 @@ export default function SearchPage() {
       )}
 
       {err && <div className="card" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c' }}>{err}</div>}
+
+      {searched && !loading && visible.length > 0 && (
+        <p className="muted" style={{ fontSize: 13, fontWeight: 700, margin: '2px 2px 10px' }}>{visible.length} ofertas encontradas</p>
+      )}
 
       {searched && !loading && visible.length === 0 && !err && (
         <div className="empty"><Briefcase size={40} /><p>No hay ofertas nuevas con estos filtros. Prueba otra ciudad, otra fecha, o los portales de arriba.</p></div>
