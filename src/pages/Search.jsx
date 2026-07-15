@@ -226,6 +226,10 @@ export default function SearchPage() {
               <button className="btn sm ghost" onClick={() => markApplied(job)}><Check size={15} /> Ya apliqué</button>
               <button className="btn sm ghost" onClick={() => markDismissed(job)} title="No me interesa"><X size={15} /> Descartar</button>
             </div>
+            <a href={`https://www.google.com/search?q=${encodeURIComponent(`"${job.title}" ${job.company} ${job.location}`)}`}
+              target="_blank" rel="noreferrer" className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              ¿El botón lleva a otra oferta? Buscar esta exacta →
+            </a>
           </motion.div>
         ))}
       </AnimatePresence>
