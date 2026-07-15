@@ -2,44 +2,48 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
 import { searchJobs, portalLinks, rolesFromDocs, aiJobSearch, geocodeCity, kmBetween, COUNTRIES, DATE_FILTERS } from '../lib/api'
-import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase, X, Folder } from 'lucide-react'
+import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase, X, Folder, Plus } from 'lucide-react'
 import CandidacyModal from '../components/CandidacyModal'
 import CityPicker from '../components/CityPicker'
 
+const R_KM = 35
+
+function nearFilter(list, cities, targets) {
+  if (!cities.length) return list
+  const aliasSets = cities.map((c) => (c.aliases && c.aliases.length ? c.aliases : [c.name]).map((a) => a.toLowerCase()))
+  return list.filter((j) => {
+    const coordOk = targets.some((t) => j.latitude != null && j.longitude != null && kmBetween(t.lat, t.lon, j.latitude, j.longitude) <= R_KM)
+    if (coordOk) return true
+    const hay = (String(j.location || '') + ' ' + (Array.isArray(j.area) ? j.area.join(' ') : '')).toLowerCase()
+    return aliasSets.some((al) => al.some((a) => a && hay.includes(a)))
+  })
+}
+
 export default function SearchPage() {
-  const { activeProfile, docs, markApplied, isApplied, markDismissed, isDismissed } = useApp()
+  const { activeProfile, docs, markApplied, isApplied, markDismissed, isDismissed, searchState, setSearchState } = useApp()
   const cvs = docs.filter((d) => d.type === 'cv')
+  const S = searchState
 
-  const [refine, setRefine] = useState('')
-  const [cities, setCities] = useState([])
-  const [country, setCountry] = useState('ch')
-  const [maxDays, setMaxDays] = useState('any')
-  const [deselected, setDeselected] = useState([])
-
-  const [results, setResults] = useState([])
-  const [termsUsed, setTermsUsed] = useState([])
-  const [note, setNote] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
   const [err, setErr] = useState('')
-  const [searched, setSearched] = useState(false)
   const [candidacyJob, setCandidacyJob] = useState(null)
 
-  const countryName = COUNTRIES.find((c) => c.code === country)?.name || ''
-  const isSel = (id) => !deselected.includes(id)
-  const toggleCv = (id) => setDeselected((d) => d.includes(id) ? d.filter((x) => x !== id) : [...d, id])
+  const countryName = COUNTRIES.find((c) => c.code === S.country)?.name || ''
+  const isSel = (id) => !S.deselected.includes(id)
+  const toggleCv = (id) => setSearchState({ deselected: S.deselected.includes(id) ? S.deselected.filter((x) => x !== id) : [...S.deselected, id] })
   const selectedCvs = cvs.filter((c) => isSel(c.id))
 
-  // Trae ofertas para una lista de consultas {what, category}, con varias páginas
-  async function fetchBatch(queries, cityList, pages) {
+  async function fetchRange(queries, whereList, startP, endP) {
     const out = []
-    for (const city of cityList) {
+    for (const where of whereList) {
       for (const q of queries) {
-        for (let pg = 1; pg <= pages; pg++) {
-          const data = await searchJobs({ what: q.what, where: city, country, maxDaysOld: maxDays, category: q.category, page: pg })
+        for (let pg = startP; pg <= endP; pg++) {
+          const data = await searchJobs({ what: q.what, where, country: S.country, maxDaysOld: S.maxDays, category: q.category, page: pg })
           const rs = data.results || []
           out.push(...rs)
-          if (rs.length < 50) break // no hay más páginas
+          if (rs.length < 50) break
         }
       }
     }
@@ -48,65 +52,72 @@ export default function SearchPage() {
   const uniqQ = (arr) => { const s = new Set(); return arr.filter((q) => { const k = q.what + '|' + q.category; if (s.has(k)) return false; s.add(k); return true }) }
 
   async function run() {
-    setLoading(true); setErr(''); setNote(''); setSearched(true)
+    setLoading(true); setErr('')
     try {
       if (!selectedCvs.length) { setErr('Selecciona al menos un CV para buscar.'); setLoading(false); return }
-      setStatusMsg(refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tus CVs…')
+      setStatusMsg(S.refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tus CVs…')
 
-      // Consultas por CV: buscamos por los PUESTOS que la IA saca del CV (fiable por sector)
       const queries = []; const display = []
-      if (refine.trim()) {
-        queries.push({ what: refine.trim(), category: '' })
+      if (S.refine.trim()) {
+        queries.push({ what: S.refine.trim(), category: '' })
       } else {
         for (const cv of selectedCvs) {
           let r
-          try { r = await aiJobSearch({ profile: { name: activeProfile?.name, docs: [cv] }, country: countryName, city: cities[0]?.name }) }
+          try { r = await aiJobSearch({ profile: { name: activeProfile?.name, docs: [cv] }, country: countryName, city: S.cities[0]?.name }) }
           catch { r = { terms: rolesFromDocs([cv]), category: '' } }
           const terms = (r.terms && r.terms.length) ? r.terms : rolesFromDocs([cv])
           terms.slice(0, 3).forEach((t) => { display.push(t); queries.push({ what: t, category: '' }) })
         }
       }
       const queriesU = uniqQ(queries)
-      setTermsUsed([...new Set(display)])
       setStatusMsg('Buscando ofertas…')
 
-      // Coordenadas de las ciudades elegidas (para filtrar por distancia real)
       const targets = []
-      for (const c of cities) {
+      for (const c of S.cities) {
         if (c.lat != null && c.lon != null) targets.push(c)
-        else { try { const g = await geocodeCity(c.name, country); if (g[0]) targets.push(g[0]) } catch { /* nada */ } }
+        else { try { const g = await geocodeCity(c.name, S.country); if (g[0]) targets.push(g[0]) } catch { /* nada */ } }
       }
 
-      // Buscamos en la ciudad Y en todo el país (más volumen), con varias páginas
+      const whereList = S.cities.length ? [...S.cities.map((c) => c.name), ''] : ['']
+      const rawAll = await fetchRange(queriesU, whereList, 1, 4)
       const seen = new Set(); const raw = []
-      const add = (rs) => { for (const j of rs) { const k = j.redirect_url || j.id; if (!seen.has(k)) { seen.add(k); raw.push(j) } } }
-      const whereList = cities.length ? [...cities.map((c) => c.name), ''] : ['']
-      add(await fetchBatch(queriesU, whereList, 4))
+      for (const j of rawAll) { const k = j.redirect_url || j.id; if (!seen.has(k)) { seen.add(k); raw.push(j) } }
 
-      const R = 35 // km a la redonda
-      let all = raw
-      if (cities.length) {
-        // nombres del lugar en varios idiomas (Genève/Genf/Geneva) + cantón
-        const aliasSets = cities.map((c) => (c.aliases && c.aliases.length ? c.aliases : [c.name]).map((a) => a.toLowerCase()))
-        const near = raw.filter((j) => {
-          const coordOk = targets.some((t) => j.latitude != null && j.longitude != null && kmBetween(t.lat, t.lon, j.latitude, j.longitude) <= R)
-          if (coordOk) return true
-          const hay = (String(j.location || '') + ' ' + (Array.isArray(j.area) ? j.area.join(' ') : '')).toLowerCase()
-          return aliasSets.some((al) => al.some((a) => a && hay.includes(a)))
-        })
-        if (near.length) all = near
-        else { all = raw; setNote(`No pude localizar ofertas justo en ${cities.map((c) => c.name).join(', ')}; te muestro las de todo el país (${countryName}).`) }
+      let results = raw, localized = false, note = ''
+      if (S.cities.length) {
+        const near = nearFilter(raw, S.cities, targets)
+        if (near.length) { results = near; localized = true }
+        else { results = raw; note = `No pude localizar ofertas justo en ${S.cities.map((c) => c.name).join(', ')}; te muestro las de todo el país (${countryName}).` }
       }
+      results = results.slice().sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0))
 
-      all.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0))
-      setResults(all)
+      setSearchState({
+        results, termsUsed: [...new Set(display)], note, searched: true,
+        queries: queriesU, whereList, targets, page: 4, localized, exhausted: false,
+      })
     } catch (e) {
-      setErr(e.message || 'No se pudieron cargar las ofertas.'); setResults([])
+      setErr(e.message || 'No se pudieron cargar las ofertas.')
     } finally { setLoading(false); setStatusMsg('') }
   }
 
-  const visible = results.filter((j) => !isApplied(j) && !isDismissed(j))
-  const links = portalLinks(country, termsUsed[0] || '', cities[0]?.name || '')
+  async function loadMore() {
+    setLoadingMore(true); setErr('')
+    try {
+      const startP = S.page + 1, endP = S.page + 3
+      const rawNew = await fetchRange(S.queries, S.whereList, startP, endP)
+      const filtered = S.localized ? nearFilter(rawNew, S.cities, S.targets) : rawNew
+      const seen = new Set(S.results.map((j) => j.redirect_url || j.id))
+      const fresh = []
+      for (const j of filtered) { const k = j.redirect_url || j.id; if (!seen.has(k)) { seen.add(k); fresh.push(j) } }
+      const merged = [...S.results, ...fresh].sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0))
+      setSearchState({ results: merged, page: endP, exhausted: fresh.length === 0 })
+    } catch (e) {
+      setErr(e.message || 'No se pudieron cargar más ofertas.')
+    } finally { setLoadingMore(false) }
+  }
+
+  const visible = S.results.filter((j) => !isApplied(j) && !isDismissed(j))
+  const links = portalLinks(S.country, S.termsUsed[0] || '', S.cities[0]?.name || '')
 
   return (
     <div>
@@ -135,26 +146,26 @@ export default function SearchPage() {
 
         <div className="field">
           <label><Globe size={13} style={{ verticalAlign: -2 }} /> País</label>
-          <select className="select" value={country} onChange={(e) => { setCountry(e.target.value); setCities([]) }}>
+          <select className="select" value={S.country} onChange={(e) => setSearchState({ country: e.target.value, cities: [] })}>
             {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
           </select>
         </div>
 
         <div className="field">
           <label>Ciudad(es) — escribe y elige de la lista</label>
-          <CityPicker cities={cities} onChange={setCities} country={country} placeholder="Ginebra, Lausana, Berna…" />
+          <CityPicker cities={S.cities} onChange={(v) => setSearchState({ cities: v })} country={S.country} placeholder="Ginebra, Lausana, Berna…" />
         </div>
 
         <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: 'var(--sky-700)', display: 'block' }}>Publicadas hace</label>
         <div className="tabs" style={{ marginBottom: 14 }}>
           {DATE_FILTERS.map((d) => (
-            <span key={d.v} className={`chip ${maxDays === d.v ? 'active' : ''}`} onClick={() => setMaxDays(d.v)}>{d.label}</span>
+            <span key={d.v} className={`chip ${S.maxDays === d.v ? 'active' : ''}`} onClick={() => setSearchState({ maxDays: d.v })}>{d.label}</span>
           ))}
         </div>
 
         <div className="field">
           <label>Afinar búsqueda (opcional — busca solo esto en vez de tus CVs)</label>
-          <input className="input" value={refine} onChange={(e) => setRefine(e.target.value)}
+          <input className="input" value={S.refine} onChange={(e) => setSearchState({ refine: e.target.value })}
             placeholder="p. ej. serveur, ayudante de cocina…" />
         </div>
 
@@ -163,20 +174,20 @@ export default function SearchPage() {
         </button>
       </div>
 
-      {termsUsed.length > 0 && searched && !loading && (
+      {S.termsUsed.length > 0 && S.searched && !loading && (
         <div className="card">
           <p className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Sparkles size={14} /> La IA buscó estos puestos:
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {termsUsed.map((t) => <span key={t} className="chip active">{t}</span>)}
+            {S.termsUsed.map((t) => <span key={t} className="chip active">{t}</span>)}
           </div>
         </div>
       )}
 
-      {note && <div className="card" style={{ background: 'var(--sky-50)', border: '1px solid var(--sky-200)', fontSize: 13 }}>{note}</div>}
+      {S.note && <div className="card" style={{ background: 'var(--sky-50)', border: '1px solid var(--sky-200)', fontSize: 13 }}>{S.note}</div>}
 
-      {searched && (termsUsed.length > 0 || cities.length) && (
+      {S.searched && (S.termsUsed.length > 0 || S.cities.length) && (
         <div className="card">
           <p className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Buscar también en los portales de {countryName}:</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -187,11 +198,11 @@ export default function SearchPage() {
 
       {err && <div className="card" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c' }}>{err}</div>}
 
-      {searched && !loading && visible.length > 0 && (
-        <p className="muted" style={{ fontSize: 13, fontWeight: 700, margin: '2px 2px 10px' }}>{visible.length} ofertas encontradas</p>
+      {S.searched && !loading && visible.length > 0 && (
+        <p className="muted" style={{ fontSize: 13, fontWeight: 700, margin: '2px 2px 10px' }}>{visible.length} ofertas</p>
       )}
 
-      {searched && !loading && visible.length === 0 && !err && (
+      {S.searched && !loading && visible.length === 0 && !err && (
         <div className="empty"><Briefcase size={40} /><p>No hay ofertas nuevas con estos filtros. Prueba otra ciudad, otra fecha, o los portales de arriba.</p></div>
       )}
 
@@ -199,7 +210,7 @@ export default function SearchPage() {
         {visible.map((job, i) => (
           <motion.div key={job.redirect_url || job.id} className="card job-item"
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ delay: Math.min(i * 0.03, 0.4) }} layout>
+            transition={{ delay: Math.min(i * 0.02, 0.3) }} layout>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
               <h3>{job.title}</h3><span className="badge new">Nueva</span>
             </div>
@@ -218,6 +229,14 @@ export default function SearchPage() {
           </motion.div>
         ))}
       </AnimatePresence>
+
+      {S.searched && !loading && visible.length > 0 && (
+        S.exhausted
+          ? <p className="empty" style={{ padding: '20px' }}>No hay más ofertas para esta búsqueda.</p>
+          : <button className="btn ghost block" style={{ marginTop: 8 }} onClick={loadMore} disabled={loadingMore}>
+              {loadingMore ? <span className="spinner dark" /> : <><Plus size={17} /> Cargar más ofertas</>}
+            </button>
+      )}
 
       <AnimatePresence>
         {candidacyJob && (

@@ -56,6 +56,15 @@ export function AppProvider({ children }) {
   const [contacts, setContacts] = useState([])
   const [dismissed, setDismissed] = useState([])
 
+  // Estado de la búsqueda de ofertas (persiste al cambiar de pestaña)
+  const defaultSearch = () => ({
+    cities: [], country: 'ch', maxDays: 'any', deselected: [], refine: '',
+    results: [], termsUsed: [], note: '', searched: false,
+    queries: [], whereList: [], targets: [], page: 1, localized: false, exhausted: false,
+  })
+  const [searchState, setSearchRaw] = useState(defaultSearch)
+  const setSearchState = useCallback((patch) => setSearchRaw((s) => ({ ...s, ...patch })), [])
+
   // --- Auth ---
   useEffect(() => {
     if (!firebaseReady) { setAuthLoading(false); return }
@@ -78,6 +87,8 @@ export function AppProvider({ children }) {
   }, [user])
 
   useEffect(() => { if (activeId) localStorage.setItem('rj_active', activeId) }, [activeId])
+  // al cambiar de perfil, se limpia la búsqueda guardada
+  useEffect(() => { setSearchRaw(defaultSearch()) }, [activeId])
 
   const activeProfile = profiles.find((p) => p.id === activeId) || null
 
@@ -211,6 +222,7 @@ export function AppProvider({ children }) {
     docs, addDocItem, deleteDocItem,
     applied, markApplied, unmarkApplied, isApplied,
     dismissed, markDismissed, isDismissed,
+    searchState, setSearchState,
     contacts, addContact, toggleContactSent, deleteContact,
     saveCoverTemplate, getCoverTemplate, deleteCoverTemplate,
   }
