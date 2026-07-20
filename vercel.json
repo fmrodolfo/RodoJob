@@ -1,20 +1,5 @@
-# ─────────────────────────────────────────────────────────────
-#  CONFIGURACIÓN DE RODOJOB
-#  Copia este archivo como  .env  y rellena tus valores.
-# ─────────────────────────────────────────────────────────────
-
-# --- Firebase (son públicas por diseño, van en el navegador) ---
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_STORAGE_BUCKET=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_APP_ID=
-
-# --- SECRETAS: solo en Netlify (NO llevan prefijo VITE_) ---
-# Estas se configuran en Netlify > Site settings > Environment variables
-# NO las pongas en el navegador ni en el repositorio.
-# GEMINI_API_KEY es GRATIS (sin tarjeta): https://aistudio.google.com/app/apikey
-GEMINI_API_KEY=
-ADZUNA_APP_ID=
-ADZUNA_APP_KEY=
+{
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
