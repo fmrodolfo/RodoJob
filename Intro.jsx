@@ -50,8 +50,19 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
     } finally { setBusy('') }
   }
 
+  // Nombre del archivo: "[Carta de motivación en su idioma] [Nombre del perfil]"
+  function fileBaseName() {
+    const prefixes = {
+      español: 'Carta de motivación', francés: 'Lettre de motivation', alemán: 'Motivationsschreiben',
+      italiano: 'Lettera di motivazione', inglés: 'Cover letter', portugués: 'Carta de motivação',
+    }
+    const prefix = prefixes[language] || 'Carta de motivación'
+    const name = (activeProfile?.name || '').trim()
+    return `${prefix}${name ? ' ' + name : ''}`.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim()
+  }
+
   function copy() { navigator.clipboard.writeText(letter); setCopied(true); setTimeout(() => setCopied(false), 1500) }
-  function pdf() { letterToPdf({ subtitle: `${job.title} · ${job.company}`, body: letter, filename: `Carta_${slug(job.company)}.pdf` }) }
+  function pdf() { letterToPdf({ subtitle: `${job.title} · ${job.company}`, body: letter, filename: `${fileBaseName()}.pdf` }) }
   async function word() {
     setErr(''); setBusy('word')
     try {
@@ -59,7 +70,7 @@ export default function CandidacyModal({ job, onClose, onApplied, companyMode = 
       if (!base64) { setErr('No encuentro la plantilla de carta. Revísala en tu perfil.'); return }
       const fecha = new Date().toLocaleDateString('es-ES')
       fillDocxTemplate(base64, { cuerpo: letter, empresa: job.company, puesto: job.title, lugar: job.location, fecha },
-        `Carta_${slug(job.company)}.docx`)
+        `${fileBaseName()}.docx`)
     } catch (e) {
       setErr(e.message || 'No se pudo generar la carta en Word. Revisa que la marca {cuerpo} esté en tu plantilla.')
     } finally { setBusy('') }
