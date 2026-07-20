@@ -27,13 +27,26 @@ export default async function handler(req, res) {
     const { lat, lon } = geo[0]
 
     const body = filters.map((f) => `node[${f}](around:9000,${lat},${lon});way[${f}](around:9000,${lat},${lon});`).join('')
-    const query = `[out:json][timeout:25];(${body});out center 60;`
-    const ovRes = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
-      body: 'data=' + encodeURIComponent(query),
-    })
-    if (!ovRes.ok) return res.status(502).json({ error: 'No pude consultar OpenStreetMap ahora mismo.' })
-    const ov = await ovRes.json()
+    const query = `[out:json][timeout:25];(${body});out center 50;`
+
+    // Varios servidores espejo de Overpass; si uno está saturado, se prueba el siguiente
+    const ENDPOINTS = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://overpass.openstreetmap.ru/api/interpreter',
+      'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    ]
+    let ov = null
+    for (const ep of ENDPOINTS) {
+      try {
+        const ovRes = await fetch(ep, {
+          method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
+          body: 'data=' + encodeURIComponent(query),
+        })
+        if (ovRes.ok) { ov = await ovRes.json(); break }
+      } catch { /* probar el siguiente */ }
+    }
+    if (!ov) return res.status(502).json({ error: 'Los servidores de OpenStreetMap están ocupados ahora mismo. Espera un momento y vuelve a intentarlo.' })
 
     const seen = new Set()
     const results = []
