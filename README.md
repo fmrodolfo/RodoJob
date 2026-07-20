@@ -1,120 +1,231 @@
-# RodoJob — Tu asistente de búsqueda de empleo
+import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { auth, db, firebaseReady } from '../firebase'
+import {
+  onAuthStateChanged, signInWithEmailAndPassword,
+  createUserWithEmailAndPassword, signOut,
+} from 'firebase/auth'
+import {
+  collection, doc, setDoc, addDoc, deleteDoc, updateDoc, getDoc,
+  onSnapshot, serverTimestamp, query, orderBy,
+} from 'firebase/firestore'
 
-App moderna (React + Vite) con sincronización en Firebase, IA de Google Gemini (gratis) para adaptar CVs y cartas, ofertas reales vía Adzuna, búsqueda de empresas reales por ciudad/sector vía OpenStreetMap (gratis, sin clave), perfiles independientes, PDFs de candidatura y candidaturas unificadas. Diseñada para desplegar en Netlify.
+// Convierte una imagen a un data URL comprimido (para guardarla en Firestore sin Storage)
+function imageToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new Image()
+      img.onload = () => {
+        const max = 320
+        let { width, height } = img
+        if (width > height && width > max) { height = Math.round(height * max / width); width = max }
+        else if (height > max) { width = Math.round(width * max / height); height = max }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/jpeg', 0.82))
+      }
+      img.onerror = reject
+      img.src = reader.result
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
 
-## ✨ Funciones
-- La IA lee tus CVs y busca ofertas por ti (sin escribir el puesto).
-- Búsqueda en **varias ciudades a la vez** (separadas por comas), en ofertas y en empresas.
-- Filtros por fecha (24 h / 7 / 15 / 30 días).
-- Sube tu CV en **PDF**: la app extrae el texto para que la IA lo adapte.
-- Buscador de **empresas reales** por ciudad y sector (OpenStreetMap) con enlace a su web.
-- Botón por oferta/empresa para generar CV y carta adaptados y descargarlos en PDF.
-- Pestaña "Mis candidaturas" con conmutador **Ofertas / Empresas** (sin repetir).
-- Perfiles independientes con foto, sincronizados entre dispositivos con Firebase.
+const Ctx = createContext(null)
+export const useApp = () => useContext(Ctx)
 
----
+// id estable por título + empresa + lugar (junta duplicados de la misma oferta)
+export function jobKey(job) {
+  const base = `${job.title || ''}|${job.company || ''}|${job.location || ''}`
+    .toLowerCase().replace(/\s+/g, ' ').trim()
+  let h = 0
+  for (let i = 0; i < base.length; i++) { h = (h * 31 + base.charCodeAt(i)) | 0 }
+  return 'j' + Math.abs(h).toString(36)
+}
 
-## 🚀 Puesta en marcha (una sola vez, ~15 min)
+export function AppProvider({ children }) {
+  const [user, setUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
 
-Necesitas 3 cosas **totalmente gratuitas**: **Firebase**, **Adzuna** y **Google Gemini** (la IA). Ninguna te pide tarjeta. Ya tienes Firebase y Netlify, así que vamos al grano.
+  const [profiles, setProfiles] = useState([])
+  const [activeId, setActiveId] = useState(() => localStorage.getItem('rj_active') || null)
 
-### 1) Firebase (sincroniza tus teléfonos)
+  const [docs, setDocs] = useState([])
+  const [applied, setApplied] = useState([])
+  const [contacts, setContacts] = useState([])
+  const [dismissed, setDismissed] = useState([])
 
-1. Entra en <https://console.firebase.google.com> → tu proyecto.
-2. **Authentication** → *Sign-in method* → activa **Correo electrónico/contraseña**.
-3. **Firestore Database** → *Crear base de datos* → modo producción → elige región.
-4. **Reglas de seguridad** (para que solo tú veas tus datos): en Firestore → pestaña *Reglas* → pega el contenido de `firestore.rules` → Publicar.
-5. **Configuración del proyecto** (⚙️) → *Tus apps* → crea una app **Web** (`</>`) → copia los 6 valores del objeto `firebaseConfig`.
+  // Estado de la búsqueda de ofertas (persiste al cambiar de pestaña)
+  const defaultSearch = () => ({
+    cities: [], country: 'ch', maxDays: 'any', deselected: [], refine: '',
+    results: [], termsUsed: [], note: '', searched: false,
+    queries: [], whereList: [], targets: [], page: 1, localized: false, exhausted: false,
+  })
+  const [searchState, setSearchRaw] = useState(defaultSearch)
+  const setSearchState = useCallback((patch) => setSearchRaw((s) => ({ ...s, ...patch })), [])
 
-> Nota: NO hace falta activar **Storage** (eso pide tarjeta). Las fotos y CVs se guardan en Firestore, que es gratis.
+  // --- Auth ---
+  useEffect(() => {
+    if (!firebaseReady) { setAuthLoading(false); return }
+    return onAuthStateChanged(auth, (u) => { setUser(u); setAuthLoading(false) })
+  }, [])
 
-### 2) Adzuna (ofertas reales)
+  const login = (email, pass) => signInWithEmailAndPassword(auth, email, pass)
+  const register = (email, pass) => createUserWithEmailAndPassword(auth, email, pass)
+  const logout = () => signOut(auth)
 
-1. Regístrate gratis en <https://developer.adzuna.com/>.
-2. Crea una app y copia tu **App ID** y **App Key**.
+  // --- Perfiles (sincronizados) ---
+  useEffect(() => {
+    if (!user) { setProfiles([]); return }
+    const q = query(collection(db, 'users', user.uid, 'profiles'), orderBy('createdAt', 'asc'))
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      setProfiles(list)
+      setActiveId((cur) => (cur && list.some((p) => p.id === cur)) ? cur : (list[0]?.id || null))
+    })
+  }, [user])
 
-### 3) Google Gemini (la IA — GRATIS, sin tarjeta)
+  useEffect(() => { if (activeId) localStorage.setItem('rj_active', activeId) }, [activeId])
+  // al cambiar de perfil, se limpia la búsqueda guardada
+  useEffect(() => { setSearchRaw(defaultSearch()) }, [activeId])
 
-1. Entra en <https://aistudio.google.com/app/apikey> con tu cuenta de Google.
-2. Pulsa **Create API key** y copia la clave. No hay que pagar ni poner tarjeta; la capa gratuita sobra para uso personal.
+  const activeProfile = profiles.find((p) => p.id === activeId) || null
 
----
+  // --- Subcolecciones del perfil activo ---
+  useEffect(() => {
+    if (!user || !activeId) { setDocs([]); setApplied([]); setContacts([]); setDismissed([]); return }
+    const p = ['users', user.uid, 'profiles', activeId]
+    const unsubs = [
+      onSnapshot(collection(db, ...p, 'docs'), (s) =>
+        setDocs(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(collection(db, ...p, 'applied'), (s) =>
+        setApplied(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(collection(db, ...p, 'contacts'), (s) =>
+        setContacts(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(collection(db, ...p, 'dismissed'), (s) =>
+        setDismissed(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+    ]
+    return () => unsubs.forEach((u) => u())
+  }, [user, activeId])
 
-## 🌐 Desplegar en Netlify
+  // --- CRUD perfiles ---
+  const createProfile = useCallback(async (name, photoFile) => {
+    if (!user) return
+    const pRef = await addDoc(collection(db, 'users', user.uid, 'profiles'), {
+      name: name || 'Nuevo perfil', photoURL: '', createdAt: serverTimestamp(),
+    })
+    if (photoFile) {
+      const url = await imageToDataURL(photoFile)
+      await updateDoc(pRef, { photoURL: url })
+    }
+    setActiveId(pRef.id)
+    return pRef.id
+  }, [user])
 
-1. Sube esta carpeta a un repositorio de GitHub (o arrástrala en Netlify → *Add new site*).
-2. Netlify detectará la configuración de `netlify.toml` automáticamente
-   (build: `npm run build`, carpeta: `dist`, funciones: `netlify/functions`).
-3. En **Site settings → Environment variables**, añade estas variables:
+  const updateProfile = useCallback(async (id, data, photoFile) => {
+    if (!user) return
+    const pRef = doc(db, 'users', user.uid, 'profiles', id)
+    let patch = { ...data }
+    if (photoFile) patch.photoURL = await imageToDataURL(photoFile)
+    await updateDoc(pRef, patch)
+  }, [user])
 
-| Variable | Valor | ¿Dónde? |
-|---|---|---|
-| `VITE_FIREBASE_API_KEY` | de firebaseConfig | Firebase |
-| `VITE_FIREBASE_AUTH_DOMAIN` | de firebaseConfig | Firebase |
-| `VITE_FIREBASE_PROJECT_ID` | de firebaseConfig | Firebase |
-| `VITE_FIREBASE_STORAGE_BUCKET` | de firebaseConfig | Firebase |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | de firebaseConfig | Firebase |
-| `VITE_FIREBASE_APP_ID` | de firebaseConfig | Firebase |
-| `GEMINI_API_KEY` | tu clave de Google AI Studio | Gemini |
-| `ADZUNA_APP_ID` | tu App ID | Adzuna |
-| `ADZUNA_APP_KEY` | tu App Key | Adzuna |
+  const deleteProfile = useCallback(async (id) => {
+    if (!user) return
+    await deleteDoc(doc(db, 'users', user.uid, 'profiles', id))
+  }, [user])
 
-> ⚠️ Las que empiezan por `VITE_` van al navegador (las de Firebase son públicas por diseño).
-> Las **secretas** (`GEMINI_API_KEY`, `ADZUNA_*`) **NO** llevan `VITE_`: se quedan en el
-> servidor, dentro de las funciones de Netlify. Nunca se exponen en el navegador.
+  // --- CRUD documentos (CV / carta) ---
+  // Guardamos el texto del CV/carta (no el archivo original) para no necesitar Storage.
+  const addDocItem = useCallback(async (data) => {
+    if (!user || !activeId) return
+    await addDoc(collection(db, 'users', user.uid, 'profiles', activeId, 'docs'), {
+      ...data, createdAt: serverTimestamp(),
+    })
+  }, [user, activeId])
 
-4. Pulsa **Deploy**. En 1-2 min tendrás tu URL (`https://tu-sitio.netlify.app`).
-5. Ábrela en el móvil y añádela a la pantalla de inicio ("Añadir a inicio") para usarla como app.
+  const deleteDocItem = useCallback(async (id) => {
+    if (!user || !activeId) return
+    await deleteDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', id))
+  }, [user, activeId])
 
----
+  // --- Aplicadas (sin duplicados: id = jobKey) ---
+  const markApplied = useCallback(async (job) => {
+    if (!user || !activeId) return
+    const key = jobKey(job)
+    await setDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'applied', key), {
+      title: job.title, company: job.company, location: job.location,
+      url: job.redirect_url || job.url || '', appliedAt: serverTimestamp(),
+    })
+  }, [user, activeId])
 
-## 💻 Probar en tu ordenador (opcional)
+  const unmarkApplied = useCallback(async (key) => {
+    if (!user || !activeId) return
+    await deleteDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'applied', key))
+  }, [user, activeId])
 
-```bash
-npm install
-cp .env.example .env     # rellena los valores VITE_ de Firebase
-npm run dev              # http://localhost:5173
-```
-> Nota: las funciones de IA y ofertas necesitan Netlify. Para probarlas en local usa
-> `npm i -g netlify-cli` y `netlify dev` (con las variables secretas en tu `.env`).
+  const isApplied = useCallback((job) => applied.some((a) => a.id === jobKey(job)), [applied])
 
----
+  // --- Descartadas (ofertas que no interesan; no vuelven a salir) ---
+  const markDismissed = useCallback(async (job) => {
+    if (!user || !activeId) return
+    const key = jobKey(job)
+    await setDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'dismissed', key), {
+      title: job.title, company: job.company, dismissedAt: serverTimestamp(),
+    })
+  }, [user, activeId])
 
-## 📱 Cómo se usa
+  const isDismissed = useCallback((job) => dismissed.some((d) => d.id === jobKey(job)), [dismissed])
 
-1. **Intro** animada con el logo RodoJob.
-2. **Inicia sesión** con tu correo (el mismo en todos tus teléfonos → todo se sincroniza).
-3. **Elige o crea un perfil** (uno para ti, otro para un familiar; son independientes, con foto).
-4. **Perfil**: carga tus CVs (por sector) y cartas de motivación. La IA los usa como base.
-5. **Ofertas**: escribe puesto, lugar y país. Salen ofertas reales + botones a jobup, Indeed, LinkedIn, etc.
-   - **Ver y aplicar**: te lleva a la web de la empresa.
-   - **Preparar con IA**: genera un CV y una carta adaptados a *esa* oferta y los descarga en PDF (solo si tú lo pides).
-   - **Ya apliqué**: la oferta pasa a la pestaña *Aplicadas* y no vuelve a salir (sin repetidos).
-6. **Empresas / hoteles / restaurantes**: tu lista para candidaturas espontáneas, con enlace a su web,
-   botón de correo, redacción del correo con IA y opción de **tachar** al enviarlo.
+  // --- Contactos (empresas / hoteles / restaurantes) ---
+  const addContact = useCallback(async (data) => {
+    if (!user || !activeId) return
+    await addDoc(collection(db, 'users', user.uid, 'profiles', activeId, 'contacts'), {
+      ...data, createdAt: serverTimestamp(),
+    })
+  }, [user, activeId])
 
----
+  const toggleContactSent = useCallback(async (id, sent) => {
+    if (!user || !activeId) return
+    await updateDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'contacts', id), { sent })
+  }, [user, activeId])
 
-## ❗ Nota honesta sobre "todos los portales"
+  const deleteContact = useCallback(async (id) => {
+    if (!user || !activeId) return
+    await deleteDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'contacts', id))
+  }, [user, activeId])
 
-Ninguna app puede conectarse legal y fiablemente a *todas* las webs de empleo (Indeed, LinkedIn,
-jobup... no ofrecen acceso libre y bloquean el scraping). RodoJob usa la mejor combinación real:
-**Adzuna** (que ya agrega ofertas de Indeed y muchos portales por país) **más enlaces de búsqueda
-directos** a los principales portales de cada país, ya rellenados con tu búsqueda. Así cubres una
-cantidad enorme de ofertas sin promesas falsas. Puedes añadir más portales fácilmente en
-`src/lib/api.js` (objeto `JOB_PORTALS`).
+  // --- Plantilla de CARTA en Word (.docx) por cada CV/carpeta ---
+  const saveCoverTemplate = useCallback(async (docId, base64, name) => {
+    if (!user || !activeId) return
+    await setDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId, 'assets', 'coverTemplate'), { data: base64, name })
+    await updateDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId), { coverTemplateName: name })
+  }, [user, activeId])
 
-## 🛠️ Estructura del código
+  const getCoverTemplate = useCallback(async (docId) => {
+    if (!user || !activeId) return null
+    const snap = await getDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId, 'assets', 'coverTemplate'))
+    return snap.exists() ? snap.data().data : null
+  }, [user, activeId])
 
-```
-src/
-  components/   Intro, Auth, ProfileGate, Layout, CandidacyModal
-  pages/        Search, Applied, Directory, Profile
-  context/      AppContext (auth + Firestore + estado)
-  lib/          api.js (ofertas/IA), pdf.js (generación PDF)
-  firebase.js   configuración de Firebase
-netlify/functions/
-  jobs.js       proxy seguro a Adzuna
-  gemini.js     proxy seguro a Google Gemini (IA gratis)
-  companies.js  empresas reales vía OpenStreetMap (sin clave)
-```
+  const deleteCoverTemplate = useCallback(async (docId) => {
+    if (!user || !activeId) return
+    await deleteDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId, 'assets', 'coverTemplate'))
+    await updateDoc(doc(db, 'users', user.uid, 'profiles', activeId, 'docs', docId), { coverTemplateName: '' })
+  }, [user, activeId])
+
+  const value = {
+    firebaseReady, user, authLoading, login, register, logout,
+    profiles, activeId, setActiveId, activeProfile,
+    createProfile, updateProfile, deleteProfile,
+    docs, addDocItem, deleteDocItem,
+    applied, markApplied, unmarkApplied, isApplied,
+    dismissed, markDismissed, isDismissed,
+    searchState, setSearchState,
+    contacts, addContact, toggleContactSent, deleteContact,
+    saveCoverTemplate, getCoverTemplate, deleteCoverTemplate,
+  }
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+}

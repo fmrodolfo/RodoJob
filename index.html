@@ -1,20 +1,253 @@
-<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0ea5e9" />
-    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="RodoJob" />
-    <title>RodoJob</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>
+import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { useApp, jobKey } from '../context/AppContext'
+import { searchJobs, portalLinks, rolesFromDocs, aiJobSearch, geocodeCity, kmBetween, COUNTRIES, DATE_FILTERS } from '../lib/api'
+import { Search as SearchIcon, ExternalLink, Check, Sparkles, Globe, Clock, Briefcase, X, Folder, Plus } from 'lucide-react'
+import CandidacyModal from '../components/CandidacyModal'
+import CityPicker from '../components/CityPicker'
+
+const R_KM = 35
+
+function nearFilter(list, cities, targets) {
+  if (!cities.length) return list
+  const aliasSets = cities.map((c) => (c.aliases && c.aliases.length ? c.aliases : [c.name]).map((a) => a.toLowerCase()))
+  return list.filter((j) => {
+    const coordOk = targets.some((t) => j.latitude != null && j.longitude != null && kmBetween(t.lat, t.lon, j.latitude, j.longitude) <= R_KM)
+    if (coordOk) return true
+    const hay = (String(j.location || '') + ' ' + (Array.isArray(j.area) ? j.area.join(' ') : '')).toLowerCase()
+    return aliasSets.some((al) => al.some((a) => a && hay.includes(a)))
+  })
+}
+
+export default function SearchPage() {
+  const { activeProfile, docs, markApplied, isApplied, markDismissed, isDismissed, searchState, setSearchState } = useApp()
+  const cvs = docs.filter((d) => d.type === 'cv')
+  const S = searchState
+
+  const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [statusMsg, setStatusMsg] = useState('')
+  const [err, setErr] = useState('')
+  const [candidacyJob, setCandidacyJob] = useState(null)
+
+  const countryName = COUNTRIES.find((c) => c.code === S.country)?.name || ''
+  const isSel = (id) => !S.deselected.includes(id)
+  const toggleCv = (id) => setSearchState({ deselected: S.deselected.includes(id) ? S.deselected.filter((x) => x !== id) : [...S.deselected, id] })
+  const selectedCvs = cvs.filter((c) => isSel(c.id))
+
+  async function fetchRange(queries, whereList, startP, endP) {
+    const out = []
+    for (const where of whereList) {
+      for (const q of queries) {
+        for (let pg = startP; pg <= endP; pg++) {
+          const data = await searchJobs({ what: q.what, where, country: S.country, maxDaysOld: S.maxDays, category: q.category, page: pg })
+          const rs = data.results || []
+          out.push(...rs)
+          if (rs.length < 50) break
+        }
+      }
+    }
+    return out
+  }
+  const uniqQ = (arr) => { const s = new Set(); return arr.filter((q) => { const k = q.what + '|' + q.category; if (s.has(k)) return false; s.add(k); return true }) }
+
+  async function run() {
+    setLoading(true); setErr('')
+    try {
+      if (!selectedCvs.length) { setErr('Selecciona al menos un CV para buscar.'); setLoading(false); return }
+      setStatusMsg(S.refine.trim() ? 'Buscando ofertas…' : 'La IA está leyendo tus CVs…')
+
+      const queries = []; const display = []
+      if (S.refine.trim()) {
+        queries.push({ what: S.refine.trim(), category: '' })
+      } else {
+        for (const cv of selectedCvs) {
+          let r
+          try { r = await aiJobSearch({ profile: { name: activeProfile?.name, docs: [cv] }, country: countryName, city: S.cities[0]?.name }) }
+          catch { r = { terms: rolesFromDocs([cv]), category: '' } }
+          const terms = (r.terms && r.terms.length) ? r.terms : rolesFromDocs([cv])
+          terms.slice(0, 3).forEach((t) => { display.push(t); queries.push({ what: t, category: '' }) })
+        }
+      }
+      const queriesU = uniqQ(queries)
+      setStatusMsg('Buscando ofertas…')
+
+      const targets = []
+      for (const c of S.cities) {
+        if (c.lat != null && c.lon != null) targets.push(c)
+        else { try { const g = await geocodeCity(c.name, S.country); if (g[0]) targets.push(g[0]) } catch { /* nada */ } }
+      }
+
+      const whereList = S.cities.length ? [...S.cities.map((c) => c.name), ''] : ['']
+      const rawAll = await fetchRange(queriesU, whereList, 1, 4)
+      const seen = new Set(); const raw = []
+      for (const j of rawAll) { const k = jobKey(j); if (!seen.has(k)) { seen.add(k); raw.push(j) } }
+
+      let results = raw, localized = false, note = ''
+      if (S.cities.length) {
+        const near = nearFilter(raw, S.cities, targets)
+        if (near.length) { results = near; localized = true }
+        else { results = raw; note = `No pude localizar ofertas justo en ${S.cities.map((c) => c.name).join(', ')}; te muestro las de todo el país (${countryName}).` }
+      }
+      results = results.slice().sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0))
+
+      setSearchState({
+        results, termsUsed: [...new Set(display)], note, searched: true,
+        queries: queriesU, whereList, targets, page: 4, localized, exhausted: false,
+      })
+    } catch (e) {
+      setErr(e.message || 'No se pudieron cargar las ofertas.')
+    } finally { setLoading(false); setStatusMsg('') }
+  }
+
+  async function loadMore() {
+    setLoadingMore(true); setErr('')
+    try {
+      const startP = S.page + 1, endP = S.page + 3
+      const rawNew = await fetchRange(S.queries, S.whereList, startP, endP)
+      const filtered = S.localized ? nearFilter(rawNew, S.cities, S.targets) : rawNew
+      const seen = new Set(S.results.map((j) => jobKey(j)))
+      const fresh = []
+      for (const j of filtered) { const k = jobKey(j); if (!seen.has(k)) { seen.add(k); fresh.push(j) } }
+      const merged = [...S.results, ...fresh].sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0))
+      setSearchState({ results: merged, page: endP, exhausted: fresh.length === 0 })
+    } catch (e) {
+      setErr(e.message || 'No se pudieron cargar más ofertas.')
+    } finally { setLoadingMore(false) }
+  }
+
+  const visible = S.results.filter((j) => !isApplied(j) && !isDismissed(j))
+  const links = portalLinks(S.country, S.termsUsed[0] || '', S.cities[0]?.name || '')
+
+  return (
+    <div>
+      <h1 className="page-title">Ofertas para ti</h1>
+      <p className="page-sub">La IA lee tus CVs y busca ofertas en el idioma del país. Tú eliges con qué CVs buscar.</p>
+
+      <div className="card">
+        {cvs.length === 0 ? (
+          <div className="card" style={{ background: '#fef3c7', border: '1px solid #fde68a', marginBottom: 14 }}>
+            Añade un CV en tu perfil (pestaña Perfil) y la IA buscará ofertas por ti.
+          </div>
+        ) : (
+          <>
+            <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--sky-700)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Folder size={14} /> Buscar con estos CVs (toca para quitar/poner)
+            </label>
+            <div className="tabs" style={{ marginBottom: 14, flexWrap: 'wrap' }}>
+              {cvs.map((c) => (
+                <span key={c.id} className={`chip ${isSel(c.id) ? 'active' : ''}`} onClick={() => toggleCv(c.id)}>
+                  {isSel(c.id) ? <Check size={13} /> : <X size={13} />} {c.sector || c.title}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="field">
+          <label><Globe size={13} style={{ verticalAlign: -2 }} /> País</label>
+          <select className="select" value={S.country} onChange={(e) => setSearchState({ country: e.target.value, cities: [] })}>
+            {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+          </select>
+        </div>
+
+        <div className="field">
+          <label>Ciudad(es) — escribe y elige de la lista</label>
+          <CityPicker cities={S.cities} onChange={(v) => setSearchState({ cities: v })} country={S.country} placeholder="Ginebra, Lausana, Berna…" />
+        </div>
+
+        <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: 'var(--sky-700)', display: 'block' }}>Publicadas hace</label>
+        <div className="tabs" style={{ marginBottom: 14 }}>
+          {DATE_FILTERS.map((d) => (
+            <span key={d.v} className={`chip ${S.maxDays === d.v ? 'active' : ''}`} onClick={() => setSearchState({ maxDays: d.v })}>{d.label}</span>
+          ))}
+        </div>
+
+        <div className="field">
+          <label>Afinar búsqueda (opcional — busca solo esto en vez de tus CVs)</label>
+          <input className="input" value={S.refine} onChange={(e) => setSearchState({ refine: e.target.value })}
+            placeholder="p. ej. serveur, ayudante de cocina…" />
+        </div>
+
+        <button className="btn block" onClick={run} disabled={loading || cvs.length === 0}>
+          {loading ? <><span className="spinner" /> {statusMsg}</> : <><SearchIcon size={18} /> Buscar ofertas para mí</>}
+        </button>
+      </div>
+
+      {S.termsUsed.length > 0 && S.searched && !loading && (
+        <div className="card">
+          <p className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Sparkles size={14} /> La IA buscó estos puestos:
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {S.termsUsed.map((t) => <span key={t} className="chip active">{t}</span>)}
+          </div>
+        </div>
+      )}
+
+      {S.note && <div className="card" style={{ background: 'var(--sky-50)', border: '1px solid var(--sky-200)', fontSize: 13 }}>{S.note}</div>}
+
+      {S.searched && (S.termsUsed.length > 0 || S.cities.length) && (
+        <div className="card">
+          <p className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Buscar también en los portales de {countryName}:</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {links.map((l) => <a key={l.name} className="chip" href={l.href} target="_blank" rel="noreferrer">{l.name} <ExternalLink size={13} /></a>)}
+          </div>
+        </div>
+      )}
+
+      {err && <div className="card" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#b91c1c' }}>{err}</div>}
+
+      {S.searched && !loading && visible.length > 0 && (
+        <p className="muted" style={{ fontSize: 13, fontWeight: 700, margin: '2px 2px 10px' }}>{visible.length} ofertas</p>
+      )}
+
+      {S.searched && !loading && visible.length === 0 && !err && (
+        <div className="empty"><Briefcase size={40} /><p>No hay ofertas nuevas con estos filtros. Prueba otra ciudad, otra fecha, o los portales de arriba.</p></div>
+      )}
+
+      <AnimatePresence>
+        {visible.map((job, i) => (
+          <motion.div key={job.redirect_url || job.id} className="card job-item"
+            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ delay: Math.min(i * 0.02, 0.3) }} layout>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <h3>{job.title}</h3><span className="badge new">Nueva</span>
+            </div>
+            <div className="job-meta">
+              <span><b>{job.company}</b></span><span>· {job.location}</span>
+              {job.salary && <span>· 💰 {job.salary}</span>}
+              {job.created && <span>· <Clock size={12} style={{ verticalAlign: -1 }} /> {new Date(job.created).toLocaleDateString('es-ES')}</span>}
+            </div>
+            {job.description && <p className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{job.description.slice(0, 160)}…</p>}
+            <div className="job-actions">
+              <a className="btn sm" href={job.redirect_url} target="_blank" rel="noreferrer">Ver y aplicar <ExternalLink size={15} /></a>
+              <button className="btn sm ghost" onClick={() => setCandidacyJob(job)}><Sparkles size={15} /> Carta con IA</button>
+              <button className="btn sm ghost" onClick={() => markApplied(job)}><Check size={15} /> Ya apliqué</button>
+              <button className="btn sm ghost" onClick={() => markDismissed(job)} title="No me interesa"><X size={15} /> Descartar</button>
+            </div>
+            <a href={`https://www.google.com/search?q=${encodeURIComponent(`"${job.title}" ${job.company} ${job.location}`)}`}
+              target="_blank" rel="noreferrer" className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              ¿El botón lleva a otra oferta? Buscar esta exacta →
+            </a>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+
+      {S.searched && !loading && visible.length > 0 && (
+        S.exhausted
+          ? <p className="empty" style={{ padding: '20px' }}>No hay más ofertas para esta búsqueda.</p>
+          : <button className="btn ghost block" style={{ marginTop: 8 }} onClick={loadMore} disabled={loadingMore}>
+              {loadingMore ? <span className="spinner dark" /> : <><Plus size={17} /> Cargar más ofertas</>}
+            </button>
+      )}
+
+      <AnimatePresence>
+        {candidacyJob && (
+          <CandidacyModal job={candidacyJob} onClose={() => setCandidacyJob(null)}
+            onApplied={() => { markApplied(candidacyJob); setCandidacyJob(null) }} />
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
