@@ -1757,15 +1757,24 @@ applyStaticI18n();
       }
     });
   }
-  // Register service worker for offline + PWA (ruta relativa: funciona en Netlify raíz o subcarpeta)
+  // Service worker + auto-actualización: si sale una versión nueva, recarga sola
+  // (salvo que estés en medio de un entreno, para no interrumpir).
   if('serviceWorker' in navigator){
+    const hadController=!!navigator.serviceWorker.controller;
+    let refreshing=false;
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{
+      if(refreshing||!hadController)return;   // no recargar en la primera instalación
+      if(SESS)return;                          // no interrumpir un entrenamiento en curso
+      refreshing=true;location.reload();
+    });
     navigator.serviceWorker.register('service-worker.js').then(reg=>{
-      console.log('✅ Service Worker registrado');
+      // busca actualización cada vez que se abre
+      reg.update&&reg.update();
       reg.addEventListener('updatefound',()=>{
         const newSW=reg.installing;
-        newSW.addEventListener('statechange',()=>{
-          if(newSW.state==='installed'&&navigator.serviceWorker.controller){
-            toast('Nueva versión disponible. Recarga para actualizar.','info');
+        newSW&&newSW.addEventListener('statechange',()=>{
+          if(newSW.state==='installed'&&navigator.serviceWorker.controller&&!SESS){
+            toast('Actualizando a la última versión…','ok');
           }
         });
       });

@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'rodovelocity-v6';
+const CACHE_VERSION = 'rodovelocity-v7';
 const CACHE_NAME = CACHE_VERSION;
 const urlsToCache = [
   './',
@@ -53,8 +53,14 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // For page navigations and the core files, bypass the browser HTTP cache so
+  // the newest version is always fetched when online (prevents "stuck on old version").
+  const isNavigation = event.request.mode === 'navigate';
+  const isCore = /(\/$|index\.html|manifest\.json|service-worker\.js)$/.test(url.pathname);
+  const req = (isNavigation || isCore) ? new Request(event.request.url, { cache: 'reload' }) : event.request;
+
   event.respondWith(
-    fetch(event.request)
+    fetch(req)
       .then(response => {
         // Only cache successful responses
         if (!response || response.status !== 200 || response.type === 'error') {
